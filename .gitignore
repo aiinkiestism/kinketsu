@@ -1,0 +1,49 @@
+# Rust
+/target/
+**/target/
+
+# Node / SvelteKit / Vite
+node_modules/
+.svelte-kit/
+build/
+dist/
+.vite/
+.vercel/
+.netlify/
+.pnpm-store/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Local DB
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

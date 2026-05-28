@@ -1,0 +1,78 @@
+@import 'tailwindcss';
+
+/* ---- Accent palette (becomes Tailwind utilities like bg-accent-mochi) ---- */
+@theme {
+	--color-accent-mochi: oklch(0.82 0.13 25);
+	--color-accent-yuzu: oklch(0.88 0.15 95);
+	--color-accent-matcha: oklch(0.82 0.13 155);
+	--color-accent-sora: oklch(0.78 0.13 245);
+	--color-accent-fuji: oklch(0.74 0.15 300);
+}
+
+/* ---- Runtime tokens that flip with theme ---- */
+:root {
+	--kk-surface-base: oklch(0.18 0.02 280);
+	--kk-surface-1: oklch(0.22 0.02 280 / 0.55);
+	--kk-surface-2: oklch(0.26 0.02 280 / 0.45);
+	--kk-stroke: oklch(0.85 0.02 280 / 0.12);
+	--kk-text-primary: oklch(0.97 0.01 280);
+	--kk-text-muted: oklch(0.75 0.02 280);
+
+	--kk-blur-sm: 12px;
+	--kk-blur-md: 24px;
+	--kk-blur-lg: 40px;
+
+	--kk-radius-sm: 0.75rem;
+	--kk-radius-md: 1.25rem;
+	--kk-radius-lg: 1.75rem;
+}
+
+@media (prefers-color-scheme: light) {
+	:root {
+		--kk-surface-base: oklch(0.98 0.005 280);
+		--kk-surface-1: oklch(1 0 0 / 0.55);
+		--kk-surface-2: oklch(1 0 0 / 0.4);
+		--kk-stroke: oklch(0.3 0.02 280 / 0.1);
+		--kk-text-primary: oklch(0.2 0.02 280);
+		--kk-text-muted: oklch(0.45 0.02 280);
+	}
+}
+
+html,
+body {
+	height: 100%;
+	margin: 0;
+	background: var(--kk-surface-base);
+	color: var(--kk-text-primary);
+	font-family:
+		ui-sans-serif,
+		system-ui,
+		-apple-system,
+		'Hiragino Kaku Gothic ProN',
+		'Yu Gothic',
+		'Meiryo',
+		sans-serif;
+	-webkit-font-smoothing: antialiased;
+	overflow: hidden;
+}
+
+@layer utilities {
+	.glass {
+		background: var(--kk-surface-1);
+		border: 1px solid var(--kk-stroke);
+		backdrop-filter: blur(var(--kk-blur-md)) saturate(140%);
+		-webkit-backdrop-filter: blur(var(--kk-blur-md)) saturate(140%);
+	}
+	.glass-strong {
+		background: var(--kk-surface-2);
+		border: 1px solid var(--kk-stroke);
+		backdrop-filter: blur(var(--kk-blur-lg)) saturate(160%);
+		-webkit-backdrop-filter: blur(var(--kk-blur-lg)) saturate(160%);
+	}
+	.glass-subtle {
+		background: var(--kk-surface-1);
+		border: 1px solid var(--kk-stroke);
+		backdrop-filter: blur(var(--kk-blur-sm)) saturate(120%);
+		-webkit-backdrop-filter: blur(var(--kk-blur-sm)) saturate(120%);
+	}
+}

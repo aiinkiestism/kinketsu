@@ -3,11 +3,7 @@ use sqlx::SqlitePool;
 use crate::Result;
 use crate::currency::ExchangeRate;
 
-pub async fn latest(
-    pool: &SqlitePool,
-    base: &str,
-    quote: &str,
-) -> Result<Option<ExchangeRate>> {
+pub async fn latest(pool: &SqlitePool, base: &str, quote: &str) -> Result<Option<ExchangeRate>> {
     let row = sqlx::query_as::<_, ExchangeRate>(
         "SELECT base, quote, rate, fetched_at FROM exchange_rates
          WHERE base = ? AND quote = ?

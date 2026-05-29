@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+
+jobs:
+  rust:
+    name: cargo check (core + server)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry & build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+          shared-key: kinketsu
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo check (core + server)
+        # kinketsu-app pulls in the Tauri stack which needs system webkit deps;
+        # we skip it in CI and let the desktop / mobile build be verified locally.
+        run: cargo check --workspace --exclude kinketsu-app
+
+      - name: cargo clippy (core + server)
+        run: cargo clippy --workspace --exclude kinketsu-app -- -D warnings
+
+  frontend:
+    name: SvelteKit (check + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: SvelteKit sync + check
+        run: pnpm check
+
+      - name: SvelteKit static build
+        run: pnpm web:build

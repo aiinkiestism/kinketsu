@@ -5,11 +5,10 @@ use crate::Result;
 use crate::models::Category;
 
 pub async fn list(pool: &SqlitePool) -> Result<Vec<Category>> {
-    let rows = sqlx::query_as::<_, Category>(
-        "SELECT * FROM categories ORDER BY name COLLATE NOCASE",
-    )
-    .fetch_all(pool)
-    .await?;
+    let rows =
+        sqlx::query_as::<_, Category>("SELECT * FROM categories ORDER BY name COLLATE NOCASE")
+            .fetch_all(pool)
+            .await?;
     Ok(rows)
 }
 
@@ -38,16 +37,14 @@ pub async fn insert(pool: &SqlitePool, cat: &Category) -> Result<()> {
 }
 
 pub async fn update(pool: &SqlitePool, cat: &Category) -> Result<()> {
-    sqlx::query(
-        "UPDATE categories SET name = ?, icon = ?, color = ?, updated_at = ? WHERE id = ?",
-    )
-    .bind(&cat.name)
-    .bind(&cat.icon)
-    .bind(&cat.color)
-    .bind(cat.updated_at)
-    .bind(cat.id)
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE categories SET name = ?, icon = ?, color = ?, updated_at = ? WHERE id = ?")
+        .bind(&cat.name)
+        .bind(&cat.icon)
+        .bind(&cat.color)
+        .bind(cat.updated_at)
+        .bind(cat.id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

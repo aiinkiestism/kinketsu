@@ -11,8 +11,7 @@ use crate::llm::LlmClient;
 use crate::{Error, Result};
 
 const API_BASE: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
-const SEARCH_KEYWORDS: &str =
-    "(invoice OR receipt OR subscription OR \"recurring payment\" OR renewal OR \"請求\" OR \"明細\" OR \"領収\")";
+const SEARCH_KEYWORDS: &str = "(invoice OR receipt OR subscription OR \"recurring payment\" OR renewal OR \"請求\" OR \"明細\" OR \"領収\")";
 const BODY_CHAR_LIMIT: usize = 8000;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -71,10 +70,7 @@ pub async fn list_message_ids(access_token: &str, query: &str) -> Result<Vec<Str
     let mut page_token: Option<String> = None;
 
     loop {
-        let mut url = format!(
-            "{API_BASE}/messages?q={}&maxResults=100",
-            url_encode(query)
-        );
+        let mut url = format!("{API_BASE}/messages?q={}&maxResults=100", url_encode(query));
         if let Some(pt) = page_token.as_ref() {
             url.push_str("&pageToken=");
             url.push_str(pt);
@@ -154,7 +150,9 @@ fn extract_from_part(part: &Value, prefer_mime: &str) -> Option<String> {
     if mime == prefer_mime
         && let Some(data) = part.pointer("/body/data").and_then(Value::as_str)
     {
-        let bytes = base64::engine::general_purpose::URL_SAFE.decode(data).ok()?;
+        let bytes = base64::engine::general_purpose::URL_SAFE
+            .decode(data)
+            .ok()?;
         return String::from_utf8(bytes).ok();
     }
     if let Some(parts) = part.get("parts").and_then(Value::as_array) {

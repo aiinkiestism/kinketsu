@@ -25,8 +25,7 @@ pub const GMAIL_READONLY_SCOPE: &str = "https://www.googleapis.com/auth/gmail.re
 const PAYPAL_AUTH_URL: &str = "https://www.paypal.com/signin/authorize";
 const PAYPAL_TOKEN_URL: &str = "https://api-m.paypal.com/v1/oauth2/token";
 pub const PAYPAL_OPENID_SCOPE: &str = "openid";
-pub const PAYPAL_TRANSACTIONS_SCOPE: &str =
-    "https://uri.paypal.com/services/reporting/search/read";
+pub const PAYPAL_TRANSACTIONS_SCOPE: &str = "https://uri.paypal.com/services/reporting/search/read";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OAuthCredentials {
@@ -289,10 +288,10 @@ pub async fn ensure_paypal_access_token(
     tokens: &mut Tokens,
 ) -> Result<String> {
     let now = Utc::now();
-    if let (Some(tok), Some(exp)) = (tokens.access_token.as_ref(), tokens.expires_at) {
-        if exp > now + Duration::seconds(60) {
-            return Ok(tok.clone());
-        }
+    if let (Some(tok), Some(exp)) = (tokens.access_token.as_ref(), tokens.expires_at)
+        && exp > now + Duration::seconds(60)
+    {
+        return Ok(tok.clone());
     }
     let (new_token, new_expires) =
         refresh_paypal_access_token(creds, &tokens.refresh_token).await?;
@@ -305,15 +304,12 @@ pub async fn ensure_paypal_access_token(
 
 /// Return a fresh access token, refreshing in-place if the cached one is
 /// expired (or within 60 seconds of expiry).
-pub async fn ensure_access_token(
-    creds: &OAuthCredentials,
-    tokens: &mut Tokens,
-) -> Result<String> {
+pub async fn ensure_access_token(creds: &OAuthCredentials, tokens: &mut Tokens) -> Result<String> {
     let now = Utc::now();
-    if let (Some(tok), Some(exp)) = (tokens.access_token.as_ref(), tokens.expires_at) {
-        if exp > now + Duration::seconds(60) {
-            return Ok(tok.clone());
-        }
+    if let (Some(tok), Some(exp)) = (tokens.access_token.as_ref(), tokens.expires_at)
+        && exp > now + Duration::seconds(60)
+    {
+        return Ok(tok.clone());
     }
     let (new_token, new_expires) = refresh_access_token(creds, &tokens.refresh_token).await?;
     tokens.access_token = Some(new_token.clone());

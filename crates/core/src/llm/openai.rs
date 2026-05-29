@@ -62,9 +62,8 @@ impl OpenAiProvider {
             .pointer("/choices/0/message/content")
             .and_then(Value::as_str)
             .ok_or_else(|| Error::Llm("openai: response missing message.content".into()))?;
-        let data: Value = serde_json::from_str(content).map_err(|e| {
-            Error::Llm(format!("openai: response content is not valid JSON: {e}"))
-        })?;
+        let data: Value = serde_json::from_str(content)
+            .map_err(|e| Error::Llm(format!("openai: response content is not valid JSON: {e}")))?;
 
         Ok(ExtractionResponse {
             data,

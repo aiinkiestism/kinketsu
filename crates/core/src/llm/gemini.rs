@@ -59,9 +59,8 @@ impl GeminiProvider {
             .pointer("/candidates/0/content/parts/0/text")
             .and_then(Value::as_str)
             .ok_or_else(|| Error::Llm("gemini: response missing candidate text".into()))?;
-        let data: Value = serde_json::from_str(content).map_err(|e| {
-            Error::Llm(format!("gemini: response text is not valid JSON: {e}"))
-        })?;
+        let data: Value = serde_json::from_str(content)
+            .map_err(|e| Error::Llm(format!("gemini: response text is not valid JSON: {e}")))?;
 
         Ok(ExtractionResponse {
             data,

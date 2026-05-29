@@ -43,10 +43,7 @@ async fn create_subscription(
 }
 
 #[tauri::command]
-async fn update_subscription(
-    state: State<'_, AppState>,
-    sub: Subscription,
-) -> Result<(), String> {
+async fn update_subscription(state: State<'_, AppState>, sub: Subscription) -> Result<(), String> {
     let mut updated = sub;
     updated.updated_at = chrono::Utc::now();
     db::subscriptions::update(&state.pool, &updated)
@@ -202,8 +199,11 @@ async fn start_gmail_oauth(state: State<'_, AppState>) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     let redirect_uri = format!("http://127.0.0.1:{port}/callback");
-    let auth_url =
-        oauth::build_auth_url(&creds.client_id, &redirect_uri, &[oauth::GMAIL_READONLY_SCOPE]);
+    let auth_url = oauth::build_auth_url(
+        &creds.client_id,
+        &redirect_uri,
+        &[oauth::GMAIL_READONLY_SCOPE],
+    );
 
     webbrowser::open(&auth_url).map_err(|e| format!("failed to open browser: {e}"))?;
 
@@ -472,10 +472,7 @@ async fn export_subscriptions_ics(state: State<'_, AppState>) -> Result<String, 
 // ---- Exchange rates ----
 
 #[tauri::command]
-async fn refresh_exchange_rates(
-    state: State<'_, AppState>,
-    base: String,
-) -> Result<usize, String> {
+async fn refresh_exchange_rates(state: State<'_, AppState>, base: String) -> Result<usize, String> {
     let rates = kinketsu_core::currency::refresh_rates(&base)
         .await
         .map_err(|e| e.to_string())?;
@@ -520,7 +517,9 @@ async fn confirm_detection_event(
     let hint: ParsedSubscriptionHint = serde_json::from_value(ev.parsed_payload.clone())
         .map_err(|e| format!("failed to decode payload: {e}"))?;
 
-    let name = hint.service_name.ok_or_else(|| "missing service_name".to_string())?;
+    let name = hint
+        .service_name
+        .ok_or_else(|| "missing service_name".to_string())?;
     let amount = hint
         .amount_minor
         .ok_or_else(|| "missing amount_minor".to_string())?;
@@ -543,7 +542,9 @@ async fn confirm_detection_event(
         payment_method_id: None,
         category_id: None,
         status: None,
-        notes: hint.payment_method_hint.map(|h| format!("Payment hint: {h}")),
+        notes: hint
+            .payment_method_hint
+            .map(|h| format!("Payment hint: {h}")),
     };
     let sub = new_sub.into_subscription();
 

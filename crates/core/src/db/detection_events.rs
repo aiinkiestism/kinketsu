@@ -66,12 +66,10 @@ pub async fn list_by_status(
 }
 
 pub async fn get(pool: &SqlitePool, id: Uuid) -> Result<Option<DetectionEvent>> {
-    let row = sqlx::query_as::<_, DetectionEventRow>(
-        "SELECT * FROM detection_events WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
+    let row = sqlx::query_as::<_, DetectionEventRow>("SELECT * FROM detection_events WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
     row.map(DetectionEvent::try_from).transpose()
 }
 

@@ -21,6 +21,7 @@
 		<a href="/" class="brand">kinketsu</a>
 		<div class="nav-links">
 			<a href="/" class:active={page.url.pathname === '/'}>{t('nav.dashboard')}</a>
+			<a href="/inbox" class:active={page.url.pathname === '/inbox'}>{t('nav.inbox')}</a>
 			<a href="/scan" class:active={page.url.pathname === '/scan'}>{t('nav.scan')}</a>
 			<a href="/settings" class:active={page.url.pathname === '/settings'}
 				>{t('nav.settings')}</a

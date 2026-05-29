@@ -14,6 +14,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		tagline: 'Every subscription, from your inbox.',
 
 		'nav.dashboard': 'Dashboard',
+		'nav.inbox': 'Inbox',
 		'nav.scan': 'Scan',
 		'nav.settings': 'Settings',
 
@@ -94,6 +95,42 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'scan.go_settings': 'Open Settings',
 		'scan.missing_fields': 'The extracted hint is missing required fields (name, amount, currency, cycle).',
 
+		'inbox.heading': 'Subscription inbox',
+		'inbox.description':
+			'kinketsu queues every subscription it detects from your connected sources. Confirm to add them to your list; reject if it was misidentified.',
+		'inbox.sources_heading': 'Sources',
+		'inbox.sources_description':
+			'Connect external sources to start detecting subscriptions automatically.',
+		'inbox.gmail_coming_soon': 'Coming soon — Google account integration is in development.',
+		'inbox.paypal_coming_soon': 'Coming soon — PayPal subscription import is in development.',
+		'inbox.connect_gmail': 'Connect Gmail',
+		'inbox.connect_paypal': 'Connect PayPal',
+		'inbox.range_heading': 'Scan range',
+		'inbox.range_description':
+			'Pick the months kinketsu should scan when you trigger a source sync.',
+		'inbox.pending_heading': 'Pending review',
+		'inbox.reviewed_heading': 'Recently reviewed',
+		'inbox.empty':
+			'Nothing to review yet. Connect a source above or paste a receipt on the Scan page.',
+		'inbox.confirm': 'Confirm',
+		'inbox.reject': 'Reject',
+
+		'source.gmail': 'Gmail',
+		'source.paypal': 'PayPal',
+		'source.csv_import': 'CSV import',
+		'source.manual': 'Manual',
+
+		'status.pending': 'Pending',
+		'status.confirmed': 'Confirmed',
+		'status.rejected': 'Rejected',
+		'status.duplicate': 'Duplicate',
+
+		'range.all': 'All',
+		'range.none': 'None',
+		'range.selected_one': '1 month selected',
+		'range.selected_other': '{count} months selected',
+		'range.clear_all': 'Clear all',
+
 		'common.delete': 'Delete',
 		'common.error': 'Error',
 		'common.loading': 'Loading…'
@@ -102,6 +139,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		tagline: 'サブスクの全貌、メールから。',
 
 		'nav.dashboard': 'ダッシュボード',
+		'nav.inbox': 'インボックス',
 		'nav.scan': 'スキャン',
 		'nav.settings': '設定',
 
@@ -181,6 +219,40 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'scan.no_provider': 'LLM プロバイダーが未設定です。',
 		'scan.go_settings': '設定を開く',
 		'scan.missing_fields': '必須フィールド(名前・金額・通貨・サイクル)が不足しています。',
+
+		'inbox.heading': 'サブスク インボックス',
+		'inbox.description':
+			'kinketsu は接続したソースから検出したサブスクをここにキューします。「Confirm」で一覧に追加、「Reject」で却下します。',
+		'inbox.sources_heading': 'ソース',
+		'inbox.sources_description': '外部ソースを接続するとサブスクの自動検出が始まります。',
+		'inbox.gmail_coming_soon': '準備中 — Google アカウント連携を実装中です。',
+		'inbox.paypal_coming_soon': '準備中 — PayPal の定期支払い取得を実装中です。',
+		'inbox.connect_gmail': 'Gmail に接続',
+		'inbox.connect_paypal': 'PayPal に接続',
+		'inbox.range_heading': 'スキャン範囲',
+		'inbox.range_description': 'ソース同期を実行する際にスキャンする月を選択してください。',
+		'inbox.pending_heading': 'レビュー待ち',
+		'inbox.reviewed_heading': '最近の処理',
+		'inbox.empty':
+			'まだ何もありません。上のソースを接続するか、Scan ページから明細を貼り付けてください。',
+		'inbox.confirm': '確定',
+		'inbox.reject': '却下',
+
+		'source.gmail': 'Gmail',
+		'source.paypal': 'PayPal',
+		'source.csv_import': 'CSV 取込',
+		'source.manual': '手動',
+
+		'status.pending': '未処理',
+		'status.confirmed': '確定済み',
+		'status.rejected': '却下',
+		'status.duplicate': '重複',
+
+		'range.all': '全選択',
+		'range.none': '解除',
+		'range.selected_one': '1 ヶ月選択中',
+		'range.selected_other': '{count} ヶ月選択中',
+		'range.clear_all': 'すべて解除',
 
 		'common.delete': '削除',
 		'common.error': 'エラー',

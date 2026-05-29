@@ -25,6 +25,9 @@ serde_json = { workspace = true }
 kinketsu-core = { workspace = true }
 sqlx = { workspace = true }
 uuid = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+webbrowser = "1"
 
 [lints]
 workspace = true

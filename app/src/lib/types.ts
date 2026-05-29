@@ -168,6 +168,18 @@ export interface ExchangeRate {
 	fetched_at: string;
 }
 
+// ---- Gmail OAuth + scan ----
+
+export interface OAuthCredentials {
+	client_id: string;
+	client_secret: string;
+}
+
+export interface YearMonth {
+	year: number;
+	month: number;
+}
+
 // ---- Detection events ----
 
 export type DetectionSource = 'gmail' | 'paypal' | 'csv_import' | 'manual';

@@ -7,10 +7,11 @@ use kinketsu_core::currency::ExchangeRate;
 use kinketsu_core::db;
 use kinketsu_core::llm::{LlmClient, LlmConfig};
 use kinketsu_core::models::{
-    Category, DetectionEvent, DetectionStatus, NewCategory, NewPaymentMethod, NewSubscription,
-    PaymentMethod, Subscription,
+    Category, DetectionEvent, DetectionSource, DetectionStatus, NewCategory, NewPaymentMethod,
+    NewSubscription, PaymentMethod, Subscription,
 };
-use kinketsu_core::parsers::{ParsedSubscriptionHint, extract_from_text};
+use kinketsu_core::oauth::{self, OAuthCredentials, Tokens};
+use kinketsu_core::parsers::{self, ParsedSubscriptionHint, extract_from_text};
 use sqlx::SqlitePool;
 use tauri::{Manager, State};
 use uuid::Uuid;
@@ -117,6 +118,182 @@ async fn set_llm_config(state: State<'_, AppState>, config: LlmConfig) -> Result
     db::settings::set(&state.pool, db::settings::keys::LLM_CONFIG, &config)
         .await
         .map_err(|e| e.to_string())
+}
+
+// ---- Gmail OAuth + scan ----
+
+#[tauri::command]
+async fn save_gmail_oauth_credentials(
+    state: State<'_, AppState>,
+    creds: OAuthCredentials,
+) -> Result<(), String> {
+    db::settings::set(&state.pool, db::settings::keys::GMAIL_OAUTH_CREDS, &creds)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_gmail_oauth_credentials(
+    state: State<'_, AppState>,
+) -> Result<Option<OAuthCredentials>, String> {
+    db::settings::get::<OAuthCredentials>(&state.pool, db::settings::keys::GMAIL_OAUTH_CREDS)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn has_gmail_tokens(state: State<'_, AppState>) -> Result<bool, String> {
+    let tokens: Option<Tokens> = db::settings::get(&state.pool, db::settings::keys::GMAIL_TOKENS)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(tokens.is_some())
+}
+
+#[tauri::command]
+async fn disconnect_gmail(state: State<'_, AppState>) -> Result<(), String> {
+    db::settings::delete(&state.pool, db::settings::keys::GMAIL_TOKENS)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn start_gmail_oauth(state: State<'_, AppState>) -> Result<(), String> {
+    let creds: OAuthCredentials =
+        db::settings::get(&state.pool, db::settings::keys::GMAIL_OAUTH_CREDS)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Gmail OAuth credentials not configured".to_string())?;
+
+    let (listener, port) = oauth::bind_oauth_listener()
+        .await
+        .map_err(|e| e.to_string())?;
+    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+    let auth_url =
+        oauth::build_auth_url(&creds.client_id, &redirect_uri, &[oauth::GMAIL_READONLY_SCOPE]);
+
+    webbrowser::open(&auth_url).map_err(|e| format!("failed to open browser: {e}"))?;
+
+    let code = tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        oauth::wait_for_oauth_code(listener),
+    )
+    .await
+    .map_err(|_| "OAuth flow timed out after 5 minutes".to_string())?
+    .map_err(|e| e.to_string())?;
+
+    let tokens = oauth::exchange_code_for_tokens(&creds, &code, &redirect_uri)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    db::settings::set(&state.pool, db::settings::keys::GMAIL_TOKENS, &tokens)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct YearMonthDto {
+    pub year: i32,
+    pub month: u32,
+}
+
+#[tauri::command]
+async fn run_gmail_scan(
+    state: State<'_, AppState>,
+    range: Vec<YearMonthDto>,
+) -> Result<usize, String> {
+    let llm_cfg: LlmConfig = db::settings::get(&state.pool, db::settings::keys::LLM_CONFIG)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no LLM provider configured".to_string())?;
+
+    let creds: OAuthCredentials =
+        db::settings::get(&state.pool, db::settings::keys::GMAIL_OAUTH_CREDS)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Gmail OAuth credentials not configured".to_string())?;
+
+    let mut tokens: Tokens = db::settings::get(&state.pool, db::settings::keys::GMAIL_TOKENS)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Gmail not connected — click Connect Gmail first".to_string())?;
+
+    let access_token = oauth::ensure_access_token(&creds, &mut tokens)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    db::settings::set(&state.pool, db::settings::keys::GMAIL_TOKENS, &tokens)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let llm = LlmClient::from_config(llm_cfg);
+
+    let months: Vec<parsers::gmail::YearMonth> = range
+        .into_iter()
+        .map(|d| parsers::gmail::YearMonth {
+            year: d.year,
+            month: d.month,
+        })
+        .collect();
+
+    let query = parsers::gmail::build_query_for_range(&months);
+    let msg_ids = parsers::gmail::list_message_ids(&access_token, &query)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut created = 0usize;
+    for id in &msg_ids {
+        if db::detection_events::find_by_source_ref(&state.pool, DetectionSource::Gmail, id)
+            .await
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
+            continue;
+        }
+
+        let msg = match parsers::gmail::fetch_message(&access_token, id).await {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let body = match parsers::gmail::extract_text_body(&msg) {
+            Some(b) => b,
+            None => continue,
+        };
+
+        let hint = match extract_from_text(&llm, body).await {
+            Ok(h) => h,
+            Err(_) => continue,
+        };
+
+        let msg_ref = parsers::gmail::message_ref_from(&msg, id);
+        let summary = msg_ref
+            .subject
+            .clone()
+            .unwrap_or_else(|| "(no subject)".to_string());
+        let payload = serde_json::to_value(&hint).map_err(|e| e.to_string())?;
+
+        let ev = DetectionEvent {
+            id: Uuid::now_v7(),
+            source: DetectionSource::Gmail,
+            source_ref: Some(id.clone()),
+            raw_summary: Some(summary),
+            parsed_payload: payload,
+            confidence: 0.0,
+            status: DetectionStatus::Pending,
+            matched_subscription_id: None,
+            reviewed_at: None,
+            created_at: chrono::Utc::now(),
+        };
+
+        db::detection_events::insert(&state.pool, &ev)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        created += 1;
+    }
+
+    Ok(created)
 }
 
 // ---- iCalendar export ----
@@ -292,6 +469,12 @@ pub fn run() {
             refresh_exchange_rates,
             list_exchange_rates,
             export_subscriptions_ics,
+            save_gmail_oauth_credentials,
+            get_gmail_oauth_credentials,
+            has_gmail_tokens,
+            disconnect_gmail,
+            start_gmail_oauth,
+            run_gmail_scan,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

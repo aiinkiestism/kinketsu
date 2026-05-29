@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { llmConfig } from '$lib/stores/llm_config.svelte';
 	import { exchangeRates } from '$lib/stores/exchange_rates.svelte';
+	import { gmail } from '$lib/stores/gmail.svelte';
 	import { i18n, t } from '$lib/i18n.svelte';
 	import {
 		LLM_PROVIDERS,
@@ -28,6 +29,29 @@
 	let endpoint = $state('');
 	let model = $state('');
 	let savedFlash = $state(false);
+
+	let gmailClientId = $state('');
+	let gmailClientSecret = $state('');
+	let gmailSavedFlash = $state(false);
+
+	async function handleSaveGmailCreds(e: SubmitEvent) {
+		e.preventDefault();
+		if (!gmailClientId.trim() || !gmailClientSecret.trim()) return;
+		try {
+			await gmail.saveCredentials({
+				client_id: gmailClientId.trim(),
+				client_secret: gmailClientSecret.trim()
+			});
+			gmailSavedFlash = true;
+			setTimeout(() => (gmailSavedFlash = false), 2000);
+		} catch {
+			/* error in store */
+		}
+	}
+
+	async function handleDisconnectGmail() {
+		await gmail.disconnect();
+	}
 
 	function applyDefaultsForProvider(p: LlmProviderKind) {
 		const d = LLM_DEFAULTS[p];
@@ -58,7 +82,7 @@
 	}
 
 	onMount(async () => {
-		await Promise.all([llmConfig.load(), exchangeRates.load()]);
+		await Promise.all([llmConfig.load(), exchangeRates.load(), gmail.load()]);
 		const cfg = llmConfig.current;
 		if (cfg) {
 			provider = cfg.provider;
@@ -72,6 +96,10 @@
 			}
 		} else {
 			applyDefaultsForProvider(provider);
+		}
+		if (gmail.credentials) {
+			gmailClientId = gmail.credentials.client_id;
+			gmailClientSecret = gmail.credentials.client_secret;
 		}
 	});
 </script>
@@ -177,6 +205,60 @@
 			<p class="error">{t('common.error')}: {exchangeRates.error}</p>
 		{/if}
 	</section>
+
+	<section class="glass section">
+		<h2>{t('settings.gmail_heading')}</h2>
+		<p class="muted desc">{t('settings.gmail_description')}</p>
+
+		<form class="form" onsubmit={handleSaveGmailCreds}>
+			<label>
+				<span>{t('settings.gmail_client_id')}</span>
+				<input
+					type="text"
+					bind:value={gmailClientId}
+					autocomplete="off"
+					spellcheck="false"
+					placeholder="123…apps.googleusercontent.com"
+				/>
+			</label>
+			<label>
+				<span>{t('settings.gmail_client_secret')}</span>
+				<input
+					type="password"
+					bind:value={gmailClientSecret}
+					autocomplete="off"
+					spellcheck="false"
+				/>
+			</label>
+
+			<div class="actions">
+				<button type="submit" class="save" disabled={gmail.saving}>
+					{gmail.saving ? t('common.loading') : t('settings.gmail_save_creds')}
+				</button>
+				{#if gmailSavedFlash}
+					<span class="saved">{t('settings.saved')}</span>
+				{/if}
+			</div>
+		</form>
+
+		<div class="rates-status" style="margin-top:1rem">
+			<div>
+				<span class="muted small">{t('settings.gmail_status')}</span>
+				<span class="rates-time">
+					{gmail.connected ? t('settings.gmail_connected') : t('settings.gmail_not_connected')}
+				</span>
+			</div>
+			{#if gmail.connected}
+				<button type="button" class="link-like" onclick={handleDisconnectGmail}>
+					{t('settings.gmail_disconnect')}
+				</button>
+			{/if}
+		</div>
+
+		{#if gmail.error}
+			<p class="error">{t('common.error')}: {gmail.error}</p>
+		{/if}
+	</section>
 </div>
 
 <style>
@@ -279,5 +361,15 @@
 	}
 	.small {
 		font-size: 0.8rem;
+	}
+	.link-like {
+		background: transparent;
+		border: none;
+		color: var(--kk-text-muted);
+		text-decoration: underline;
+		cursor: pointer;
+		font-family: inherit;
+		font-size: 0.85rem;
+		padding: 0;
 	}
 </style>

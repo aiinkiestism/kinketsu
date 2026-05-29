@@ -10,6 +10,7 @@ pub mod error;
 pub mod ics;
 pub mod llm;
 pub mod models;
+pub mod oauth;
 pub mod parsers;
 
 pub use error::{Error, Result};

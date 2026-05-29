@@ -36,7 +36,19 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v7", "serde"] }
 
 # Async runtime
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "sync", "time"] }
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "fs",
+    "sync",
+    "time",
+    "net",
+    "io-util",
+] }
+
+# OAuth + Gmail body decoding
+base64 = "0.22"
+url = "2"
 
 # Database
 sqlx = { version = "0.8", default-features = false, features = [

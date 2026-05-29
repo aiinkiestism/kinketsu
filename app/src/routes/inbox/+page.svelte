@@ -1,13 +1,48 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { detectionEvents } from '$lib/stores/detection_events.svelte';
-	import { i18n, t } from '$lib/i18n.svelte';
+	import { gmail } from '$lib/stores/gmail.svelte';
+	import { i18n, t, tn } from '$lib/i18n.svelte';
 	import MonthRangeSelect from '$lib/components/MonthRangeSelect.svelte';
-	import type { DetectionSource } from '$lib/types';
-
-	type YearMonth = { year: number; month: number };
+	import type { DetectionSource, YearMonth } from '$lib/types';
 
 	let scanRange = $state<YearMonth[]>([]);
+	let scanFeedback = $state<string | null>(null);
+
+	async function handleConnectGmail() {
+		try {
+			await gmail.connect();
+		} catch {
+			/* error in store */
+		}
+	}
+
+	async function handleRunScan() {
+		scanFeedback = null;
+		if (!gmail.credentials) {
+			scanFeedback = t('inbox.scan_needs_creds');
+			return;
+		}
+		if (!gmail.connected) {
+			scanFeedback = t('inbox.scan_needs_connection');
+			return;
+		}
+		if (scanRange.length === 0) {
+			scanFeedback = t('inbox.scan_needs_range');
+			return;
+		}
+		try {
+			const created = await gmail.runScan(scanRange);
+			if (created === 0) {
+				scanFeedback = t('inbox.scan_complete_zero');
+			} else {
+				scanFeedback = tn('inbox.scan_complete', created);
+			}
+			await detectionEvents.load();
+		} catch {
+			/* error in store */
+		}
+	}
 
 	let pending = $derived(detectionEvents.items.filter((e) => e.status === 'pending'));
 	let reviewed = $derived(
@@ -46,7 +81,10 @@
 		return t(`source.${s}`);
 	}
 
-	onMount(() => detectionEvents.load());
+	onMount(() => {
+		detectionEvents.load();
+		gmail.load();
+	});
 </script>
 
 <div class="container">
@@ -62,9 +100,27 @@
 			<article class="source-card">
 				<div>
 					<h3>Gmail</h3>
-					<p class="muted small">{t('inbox.gmail_coming_soon')}</p>
+					{#if gmail.connected}
+						<p class="muted small connected">● {t('inbox.gmail_connected')}</p>
+					{:else if !gmail.credentials}
+						<p class="muted small">{t('inbox.scan_needs_creds')}</p>
+					{:else}
+						<p class="muted small">{t('inbox.gmail_coming_soon')}</p>
+					{/if}
 				</div>
-				<button type="button" disabled>{t('inbox.connect_gmail')}</button>
+				{#if gmail.connected}
+					<button type="button" class="secondary" onclick={() => gmail.disconnect()}
+						>{t('inbox.gmail_disconnect')}</button
+					>
+				{:else}
+					<button
+						type="button"
+						onclick={handleConnectGmail}
+						disabled={!gmail.credentials || gmail.connecting}
+					>
+						{gmail.connecting ? t('inbox.connect_gmail_loading') : t('inbox.connect_gmail')}
+					</button>
+				{/if}
 			</article>
 			<article class="source-card">
 				<div>
@@ -74,12 +130,28 @@
 				<button type="button" disabled>{t('inbox.connect_paypal')}</button>
 			</article>
 		</div>
+		{#if gmail.error}
+			<p class="error">{t('common.error')}: {gmail.error}</p>
+		{/if}
 	</section>
 
 	<section class="glass section">
 		<h2>{t('inbox.range_heading')}</h2>
 		<p class="muted desc-small">{t('inbox.range_description')}</p>
 		<MonthRangeSelect bind:value={scanRange} />
+		<div class="scan-actions">
+			<button
+				type="button"
+				class="scan-btn"
+				onclick={handleRunScan}
+				disabled={gmail.scanning || scanRange.length === 0}
+			>
+				{gmail.scanning ? t('inbox.scan_running') : t('inbox.scan_run')}
+			</button>
+			{#if scanFeedback}
+				<span class="scan-feedback">{scanFeedback}</span>
+			{/if}
+		</div>
 	</section>
 
 	<section class="list-section">
@@ -211,6 +283,38 @@
 	.source-card button:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+	.source-card button.secondary {
+		background: transparent;
+		color: var(--kk-text-muted);
+	}
+	.connected {
+		color: var(--color-accent-matcha);
+	}
+	.scan-actions {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		margin-top: 1rem;
+		flex-wrap: wrap;
+	}
+	.scan-btn {
+		padding: 0.6rem 1.25rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		background: var(--color-accent-sora);
+		color: oklch(0.15 0.05 245);
+		font-weight: 600;
+		cursor: pointer;
+		font-family: inherit;
+	}
+	.scan-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.scan-feedback {
+		font-size: 0.9rem;
+		color: var(--kk-text-muted);
 	}
 
 	.list-section {

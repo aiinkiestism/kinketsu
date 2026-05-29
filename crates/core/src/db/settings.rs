@@ -17,6 +17,14 @@ pub async fn get<T: DeserializeOwned>(pool: &SqlitePool, key: &str) -> Result<Op
     }
 }
 
+pub async fn delete(pool: &SqlitePool, key: &str) -> Result<()> {
+    sqlx::query("DELETE FROM settings WHERE key = ?")
+        .bind(key)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn set<T: Serialize>(pool: &SqlitePool, key: &str, value: &T) -> Result<()> {
     let json = serde_json::to_string(value)?;
     let now = chrono::Utc::now();
@@ -37,4 +45,6 @@ pub async fn set<T: Serialize>(pool: &SqlitePool, key: &str, value: &T) -> Resul
 /// Well-known setting keys.
 pub mod keys {
     pub const LLM_CONFIG: &str = "llm.config";
+    pub const GMAIL_OAUTH_CREDS: &str = "gmail.oauth_credentials";
+    pub const GMAIL_TOKENS: &str = "gmail.tokens";
 }

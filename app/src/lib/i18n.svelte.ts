@@ -75,6 +75,17 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.save': 'Save',
 		'settings.saved': 'Saved.',
 
+		'settings.gmail_heading': 'Gmail integration',
+		'settings.gmail_description':
+			'kinketsu uses your own Google Cloud OAuth client to read subscription emails. Create a Desktop-app OAuth client at console.cloud.google.com/apis/credentials and paste the client ID + secret here.',
+		'settings.gmail_client_id': 'Client ID',
+		'settings.gmail_client_secret': 'Client secret',
+		'settings.gmail_status': 'Status:',
+		'settings.gmail_connected': 'Connected',
+		'settings.gmail_not_connected': 'Not connected',
+		'settings.gmail_disconnect': 'Disconnect',
+		'settings.gmail_save_creds': 'Save credentials',
+
 		'settings.rates_heading': 'Exchange rates',
 		'settings.rates_description':
 			'kinketsu caches exchange rates against JPY so the dashboard total reflects all active subscriptions, regardless of currency.',
@@ -114,6 +125,18 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 			'Nothing to review yet. Connect a source above or paste a receipt on the Scan page.',
 		'inbox.confirm': 'Confirm',
 		'inbox.reject': 'Reject',
+		'inbox.scan_run': 'Run Gmail scan',
+		'inbox.scan_running': 'Scanning…',
+		'inbox.scan_complete_zero': 'Scan complete — no new subscriptions detected.',
+		'inbox.scan_complete_one': 'Scan complete — 1 new detection.',
+		'inbox.scan_complete_other': 'Scan complete — {count} new detections.',
+		'inbox.scan_needs_range': 'Select at least one month to scan.',
+		'inbox.scan_needs_creds': 'Save Gmail credentials in Settings first.',
+		'inbox.scan_needs_connection': 'Connect Gmail first.',
+		'inbox.scan_needs_llm': 'Configure an LLM provider in Settings first.',
+		'inbox.connect_gmail_loading': 'Opening browser…',
+		'inbox.gmail_connected': 'Gmail connected',
+		'inbox.gmail_disconnect': 'Disconnect',
 
 		'source.gmail': 'Gmail',
 		'source.paypal': 'PayPal',
@@ -200,6 +223,17 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.save': '保存',
 		'settings.saved': '保存しました。',
 
+		'settings.gmail_heading': 'Gmail 連携',
+		'settings.gmail_description':
+			'kinketsu はあなた自身の Google Cloud OAuth クライアントを使ってメールを読み取ります。console.cloud.google.com/apis/credentials で「デスクトップアプリ」用 OAuth クライアントを作成し、Client ID と Secret をここに貼り付けてください。',
+		'settings.gmail_client_id': 'Client ID',
+		'settings.gmail_client_secret': 'Client Secret',
+		'settings.gmail_status': '状態:',
+		'settings.gmail_connected': '接続済み',
+		'settings.gmail_not_connected': '未接続',
+		'settings.gmail_disconnect': '切断',
+		'settings.gmail_save_creds': '認証情報を保存',
+
 		'settings.rates_heading': '為替レート',
 		'settings.rates_description':
 			'kinketsu は為替レートをキャッシュして、ダッシュボードの合計を通貨横断で表示します。',
@@ -237,6 +271,18 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 			'まだ何もありません。上のソースを接続するか、Scan ページから明細を貼り付けてください。',
 		'inbox.confirm': '確定',
 		'inbox.reject': '却下',
+		'inbox.scan_run': 'Gmail スキャン実行',
+		'inbox.scan_running': 'スキャン中…',
+		'inbox.scan_complete_zero': 'スキャン完了 — 新しい検出はありませんでした。',
+		'inbox.scan_complete_one': 'スキャン完了 — 1 件の新規検出。',
+		'inbox.scan_complete_other': 'スキャン完了 — {count} 件の新規検出。',
+		'inbox.scan_needs_range': '少なくとも 1 ヶ月を選択してください。',
+		'inbox.scan_needs_creds': 'まず Settings で Gmail 認証情報を保存してください。',
+		'inbox.scan_needs_connection': 'まず Gmail に接続してください。',
+		'inbox.scan_needs_llm': 'まず Settings で LLM プロバイダーを設定してください。',
+		'inbox.connect_gmail_loading': 'ブラウザを開いています…',
+		'inbox.gmail_connected': 'Gmail 接続済み',
+		'inbox.gmail_disconnect': '切断',
 
 		'source.gmail': 'Gmail',
 		'source.paypal': 'PayPal',

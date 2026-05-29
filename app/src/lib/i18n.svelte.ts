@@ -92,6 +92,14 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.paypal_connected': 'Connected',
 		'settings.paypal_not_connected': 'Not connected',
 
+		'settings.notifications_heading': 'Renewal notifications',
+		'settings.notifications_description':
+			'kinketsu sends a system notification when an active subscription is within 7 days of its next billing date. A background check runs once a day; the button below triggers it on demand.',
+		'settings.notifications_check_now': 'Check now',
+		'settings.notifications_result_zero': 'No upcoming renewals in the next 7 days.',
+		'settings.notifications_result_one': 'Sent 1 notification.',
+		'settings.notifications_result_other': 'Sent {count} notifications.',
+
 		'settings.rates_heading': 'Exchange rates',
 		'settings.rates_description':
 			'kinketsu caches exchange rates against JPY so the dashboard total reflects all active subscriptions, regardless of currency.',
@@ -245,6 +253,14 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 			'kinketsu はあなた自身の PayPal Developer OAuth クライアント (Log In with PayPal) を使います。developer.paypal.com/dashboard/applications で作成し、Client ID と Secret を貼り付けてください。スキャンはトークン更新のみ動作し、Transaction Search API の連携は次回ラウンドで対応予定です。',
 		'settings.paypal_connected': '接続済み',
 		'settings.paypal_not_connected': '未接続',
+
+		'settings.notifications_heading': '更新通知',
+		'settings.notifications_description':
+			'kinketsu はアクティブなサブスクの次回請求が 7 日以内に迫るとシステム通知を送ります。バックグラウンドで 1 日 1 回チェックします。下のボタンで今すぐ実行できます。',
+		'settings.notifications_check_now': '今すぐ確認',
+		'settings.notifications_result_zero': '今後 7 日以内に更新予定のサブスクはありません。',
+		'settings.notifications_result_one': '通知を 1 件送信しました。',
+		'settings.notifications_result_other': '通知を {count} 件送信しました。',
 
 		'settings.rates_heading': '為替レート',
 		'settings.rates_description':

@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { invoke } from '@tauri-apps/api/core';
 	import { llmConfig } from '$lib/stores/llm_config.svelte';
 	import { exchangeRates } from '$lib/stores/exchange_rates.svelte';
 	import { gmail } from '$lib/stores/gmail.svelte';
 	import { paypal } from '$lib/stores/paypal.svelte';
-	import { i18n, t } from '$lib/i18n.svelte';
+	import { i18n, t, tn } from '$lib/i18n.svelte';
 	import {
 		LLM_PROVIDERS,
 		LLM_PROVIDER_LABEL,
@@ -56,6 +57,23 @@
 
 	async function handleDisconnectPaypal() {
 		await paypal.disconnect();
+	}
+
+	let checkingRenewals = $state(false);
+	let renewalResult = $state<number | null>(null);
+	let renewalError = $state<string | null>(null);
+
+	async function handleCheckRenewals() {
+		checkingRenewals = true;
+		renewalResult = null;
+		renewalError = null;
+		try {
+			renewalResult = await invoke<number>('check_renewals_now');
+		} catch (e) {
+			renewalError = String(e);
+		} finally {
+			checkingRenewals = false;
+		}
 	}
 
 	async function handleSaveGmailCreds(e: SubmitEvent) {
@@ -340,6 +358,30 @@
 
 		{#if paypal.error}
 			<p class="error">{t('common.error')}: {paypal.error}</p>
+		{/if}
+	</section>
+
+	<section class="glass section">
+		<h2>{t('settings.notifications_heading')}</h2>
+		<p class="muted desc">{t('settings.notifications_description')}</p>
+
+		<div class="actions">
+			<button type="button" class="save" onclick={handleCheckRenewals} disabled={checkingRenewals}>
+				{checkingRenewals
+					? t('common.loading')
+					: t('settings.notifications_check_now')}
+			</button>
+			{#if renewalResult !== null}
+				<span class="saved">
+					{renewalResult === 0
+						? t('settings.notifications_result_zero')
+						: tn('settings.notifications_result', renewalResult)}
+				</span>
+			{/if}
+		</div>
+
+		{#if renewalError}
+			<p class="error">{t('common.error')}: {renewalError}</p>
 		{/if}
 	</section>
 </div>

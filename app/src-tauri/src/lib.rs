@@ -13,7 +13,8 @@ use kinketsu_core::models::{
 use kinketsu_core::oauth::{self, OAuthCredentials, Tokens};
 use kinketsu_core::parsers::{self, ParsedSubscriptionHint, extract_from_text};
 use sqlx::SqlitePool;
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
 
 pub struct AppState {
@@ -394,6 +395,37 @@ async fn run_paypal_scan(state: State<'_, AppState>) -> Result<usize, String> {
     Err("PayPal transaction scan is not yet wired — the Transaction Search API requires a date-range loop and per-transaction LLM extraction, both of which are scoped to a follow-up round. Token refresh succeeded, so the connection is healthy.".to_string())
 }
 
+// ---- Renewal notifications ----
+
+async fn notify_renewals(handle: &AppHandle, pool: &SqlitePool) -> Result<usize, String> {
+    let due = db::subscriptions::list_due_within(pool, 7)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut sent = 0usize;
+    for sub in &due {
+        if let Some(date) = sub.next_billing_date {
+            let title = format!("{} renews soon", sub.name);
+            let body = format!("Next charge: {date}");
+            if handle
+                .notification()
+                .builder()
+                .title(title)
+                .body(body)
+                .show()
+                .is_ok()
+            {
+                sent += 1;
+            }
+        }
+    }
+    Ok(sent)
+}
+
+#[tauri::command]
+async fn check_renewals_now(state: State<'_, AppState>, app: AppHandle) -> Result<usize, String> {
+    notify_renewals(&app, &state.pool).await
+}
+
 // ---- iCalendar export ----
 
 #[tauri::command]
@@ -526,6 +558,7 @@ async fn extract_subscription_from_text(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -544,6 +577,19 @@ pub fn run() {
                 db::migrate(&pool).await?;
                 Ok::<SqlitePool, kinketsu_core::Error>(pool)
             })?;
+
+            // Daily renewal check — fires 15s after launch then every 24h.
+            let scheduler_pool = pool.clone();
+            let scheduler_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                loop {
+                    if let Err(e) = notify_renewals(&scheduler_handle, &scheduler_pool).await {
+                        log::warn!("renewal notification check failed: {e}");
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
+                }
+            });
 
             app.manage(AppState { pool });
             Ok(())
@@ -579,6 +625,7 @@ pub fn run() {
             disconnect_paypal,
             start_paypal_oauth,
             run_paypal_scan,
+            check_renewals_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

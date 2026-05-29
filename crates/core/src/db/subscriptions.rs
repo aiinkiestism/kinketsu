@@ -85,3 +85,24 @@ pub async fn delete(pool: &SqlitePool, id: Uuid) -> Result<()> {
         .await?;
     Ok(())
 }
+
+/// Return active subscriptions whose next_billing_date falls within the next
+/// `days` (inclusive of today). ISO date strings sort lexicographically so the
+/// SQL comparisons are correct as-is.
+pub async fn list_due_within(pool: &SqlitePool, days: i64) -> Result<Vec<Subscription>> {
+    let today = chrono::Utc::now().date_naive();
+    let cutoff = today + chrono::Duration::days(days);
+    let rows = sqlx::query_as::<_, Subscription>(
+        "SELECT * FROM subscriptions
+         WHERE status = 'active'
+         AND next_billing_date IS NOT NULL
+         AND next_billing_date >= ?
+         AND next_billing_date <= ?
+         ORDER BY next_billing_date",
+    )
+    .bind(today)
+    .bind(cutoff)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}

@@ -5,6 +5,9 @@ use uuid::Uuid;
 /// A piece of evidence — usually a parsed email or PayPal subscription record —
 /// that may correspond to a subscription. Sits in a review queue until the user
 /// confirms or rejects.
+///
+/// Stored separately from `Subscription` so the user can audit and correct the
+/// extraction pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionEvent {
     pub id: Uuid,
@@ -20,7 +23,8 @@ pub struct DetectionEvent {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[sqlx(rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum DetectionSource {
     Gmail,
@@ -29,7 +33,8 @@ pub enum DetectionSource {
     Manual,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[sqlx(rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum DetectionStatus {
     Pending,

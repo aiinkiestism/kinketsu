@@ -1,20 +1,74 @@
+//! OpenAI provider.
+//!
+//! Uses the Chat Completions endpoint with `response_format = json_schema`
+//! so the model is required to emit a JSON object matching the caller's
+//! schema.
+
+use serde_json::Value;
+
 use super::{ExtractionRequest, ExtractionResponse};
 use crate::{Error, Result};
 
-#[allow(dead_code)]
+const URL: &str = "https://api.openai.com/v1/chat/completions";
+
 pub struct OpenAiProvider {
     api_key: String,
     model: String,
+    client: reqwest::Client,
 }
 
 impl OpenAiProvider {
     #[must_use]
     pub fn new(api_key: String, model: String) -> Self {
-        Self { api_key, model }
+        Self {
+            api_key,
+            model,
+            client: reqwest::Client::new(),
+        }
     }
 
-    pub async fn extract(&self, _req: ExtractionRequest) -> Result<ExtractionResponse> {
-        // TODO: POST https://api.openai.com/v1/chat/completions with response_format=json_schema.
-        Err(Error::Llm("openai: extract() not yet implemented".into()))
+    pub async fn extract(&self, req: ExtractionRequest) -> Result<ExtractionResponse> {
+        let body = serde_json::json!({
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": req.system_prompt},
+                {"role": "user", "content": req.user_content},
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "subscription_extraction",
+                    "schema": req.schema,
+                },
+            },
+        });
+
+        let resp = self
+            .client
+            .post(URL)
+            .bearer_auth(&self.api_key)
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(Error::Llm(format!("openai API {status}: {text}")));
+        }
+
+        let v: Value = resp.json().await?;
+        let content = v
+            .pointer("/choices/0/message/content")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::Llm("openai: response missing message.content".into()))?;
+        let data: Value = serde_json::from_str(content).map_err(|e| {
+            Error::Llm(format!("openai: response content is not valid JSON: {e}"))
+        })?;
+
+        Ok(ExtractionResponse {
+            data,
+            confidence: None,
+        })
     }
 }

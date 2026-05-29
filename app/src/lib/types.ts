@@ -23,6 +23,19 @@ export type PaymentMethodKind =
 	| 'crypto'
 	| 'other';
 
+export const PAYMENT_METHOD_KINDS: PaymentMethodKind[] = [
+	'credit_card',
+	'debit_card',
+	'bank_account',
+	'paypal',
+	'carrier',
+	'wallet',
+	'app_store',
+	'play_store',
+	'crypto',
+	'other'
+];
+
 export interface Subscription {
 	id: string;
 	name: string;
@@ -67,6 +80,14 @@ export interface PaymentMethod {
 	updated_at: string;
 }
 
+export interface NewPaymentMethod {
+	name: string;
+	kind: PaymentMethodKind;
+	last4: string | null;
+	color: string | null;
+	icon: string | null;
+}
+
 export interface Category {
 	id: string;
 	name: string;
@@ -74,4 +95,10 @@ export interface Category {
 	color: string | null;
 	created_at: string;
 	updated_at: string;
+}
+
+export interface NewCategory {
+	name: string;
+	icon: string | null;
+	color: string | null;
 }

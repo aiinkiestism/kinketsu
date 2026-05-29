@@ -1,0 +1,13 @@
+{
+	"name": "kinketsu",
+	"private": true,
+	"description": "kinketsu monorepo root. Rust workspace + SvelteKit/Tauri app under app/.",
+	"scripts": {
+		"dev": "cd app && pnpm tauri dev",
+		"build": "cd app && pnpm tauri build",
+		"tauri": "cd app && pnpm tauri",
+		"web:dev": "cd app && pnpm dev",
+		"web:build": "cd app && pnpm build",
+		"check": "cd app && pnpm check"
+	}
+}

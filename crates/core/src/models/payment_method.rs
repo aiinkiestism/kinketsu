@@ -22,12 +22,39 @@ pub enum PaymentMethodKind {
     DebitCard,
     BankAccount,
     Paypal,
-    /// キャリア決済 (d払い, au PAY, ソフトバンクまとめて支払い)
+    /// Carrier billing (e.g. d-barai, au PAY, SoftBank "Matomete Shiharai").
     Carrier,
-    /// QR/モバイルウォレット (PayPay, 楽天Pay, LINE Pay)
+    /// QR / mobile wallets (e.g. PayPay, Rakuten Pay, LINE Pay).
     Wallet,
     AppStore,
     PlayStore,
     Crypto,
     Other,
+}
+
+/// Input DTO for creating a payment method. The server fills in `id` and timestamps.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewPaymentMethod {
+    pub name: String,
+    pub kind: PaymentMethodKind,
+    pub last4: Option<String>,
+    pub color: Option<String>,
+    pub icon: Option<String>,
+}
+
+impl NewPaymentMethod {
+    #[must_use]
+    pub fn into_payment_method(self) -> PaymentMethod {
+        let now = Utc::now();
+        PaymentMethod {
+            id: Uuid::now_v7(),
+            name: self.name,
+            kind: self.kind,
+            last4: self.last4,
+            color: self.color,
+            icon: self.icon,
+            created_at: now,
+            updated_at: now,
+        }
+    }
 }

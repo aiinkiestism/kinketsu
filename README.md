@@ -1,17 +1,17 @@
-# kinketsu (金欠)
+# kinketsu
 
 A self-hosted subscription manager that connects to your **inbox** — not your bank — to discover and track every recurring charge across services and currencies.
 
-> **金欠** /kinketsu/ — Japanese for being broke. A wink at where subscriptions take us.
+> "kinketsu" is the Japanese word for being broke. A wink at where subscriptions take us.
 
 ## Why kinketsu
 
 Today's options force a trade-off:
 
-- **マネーフォワード ME / Rocket Money** — discover subscriptions through bank/card aggregation. Recurring fee, generic per-service metadata, regional lock-in (Rocket Money is US-only; マネフォ pulls JP banks but barely surfaces rich subscription identity).
+- **Money Forward ME / Rocket Money** — discover subscriptions through bank/card aggregation. Recurring fee, generic per-service metadata, regional lock-in (Rocket Money is US-only; Money Forward pulls Japanese banks but barely surfaces rich subscription identity).
 - **Bobby / Subby / Wallos** — beautiful subscription-first UIs, but every entry is manual. No discovery.
 
-**kinketsu treats your email inbox as the universal subscription registry.** Netflix, Adobe, OpenAI, Spotify, GitHub, U-NEXT, dマガジン, 日経 — virtually every subscription sends confirmation and renewal emails. A user-selected LLM (Claude / OpenAI / Gemini / Ollama / LM Studio) reads them and proposes subscription entries; you confirm or reject in a review queue. No bank API, no 電子決済等代行業 registration, no recurring vendor lock-in.
+**kinketsu treats your email inbox as the universal subscription registry.** Netflix, Adobe, OpenAI, Spotify, GitHub, U-NEXT, d Magazine, Nikkei — virtually every subscription sends confirmation and renewal emails. A user-selected LLM (Claude / OpenAI / Gemini / Ollama / LM Studio) reads them and proposes subscription entries; you confirm or reject in a review queue. No bank API, no electronic-settlement-agent license, no recurring vendor lock-in.
 
 ## Status
 
@@ -56,7 +56,7 @@ kinketsu/
 
 ## Out of scope (deliberately)
 
-- **Bank / credit-card aggregation** — requires 電子決済等代行業 registration in Japan; non-starter for an individual project.
+- **Bank / credit-card aggregation** — requires Japan's electronic settlement agent license (*denshi kessai-tō dairi-gyō*); non-starter for an individual project.
 - **Crypto wallet address monitoring** — a different problem domain (on-chain flows are not subscriptions).
 - **App Store / Play Store subscription sync** — no usable public API for third-party purchases.
 
@@ -70,16 +70,17 @@ Prerequisites:
 - Android target: Android Studio + NDK (only needed for Android builds)
 
 ```sh
-# install frontend deps
-cd app
+# install all frontend deps (pnpm workspace at repo root)
 pnpm install
 ```
+
+All `pnpm` commands below can be run from the repo root; they proxy to `app/` via the workspace.
 
 ### Run the desktop app (hot reload)
 
 ```sh
-cd app
-pnpm tauri dev
+pnpm dev
+# equivalent to: cd app && pnpm tauri dev
 ```
 
 ### Run the standalone server (self-host target)
@@ -93,17 +94,17 @@ cargo run -p kinketsu-server
 ### Frontend-only dev (browser, no Tauri shell)
 
 ```sh
-cd app
-pnpm dev
+pnpm web:dev
 # http://localhost:5173 — UI renders, but Tauri commands will not resolve
 ```
 
 ### Type-check and build
 
 ```sh
-cargo check --workspace          # check all Rust crates
-cd app && pnpm check             # SvelteKit + TypeScript
-cd app && pnpm build             # static SvelteKit bundle into app/build/
+cargo check --workspace   # check all Rust crates
+pnpm check                # SvelteKit + TypeScript
+pnpm web:build            # static SvelteKit bundle into app/build/
+pnpm build                # full Tauri release bundle
 ```
 
 ## Privacy

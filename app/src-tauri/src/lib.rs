@@ -1,10 +1,12 @@
 //! Tauri shell entry point for the kinketsu app (macOS desktop + Android).
 //!
-//! Holds the `SqlitePool` in app state and exposes the v0.1 subscription
-//! commands the SvelteKit frontend calls via `@tauri-apps/api/core::invoke`.
+//! Holds the SQLite pool in app state and exposes the v0.1 commands the
+//! SvelteKit frontend calls via `@tauri-apps/api/core::invoke`.
 
 use kinketsu_core::db;
-use kinketsu_core::models::{NewSubscription, Subscription};
+use kinketsu_core::models::{
+    Category, NewCategory, NewPaymentMethod, NewSubscription, PaymentMethod, Subscription,
+};
 use sqlx::SqlitePool;
 use tauri::{Manager, State};
 use uuid::Uuid;
@@ -12,6 +14,8 @@ use uuid::Uuid;
 pub struct AppState {
     pub pool: SqlitePool,
 }
+
+// ---- subscriptions ----
 
 #[tauri::command]
 async fn list_subscriptions(state: State<'_, AppState>) -> Result<Vec<Subscription>, String> {
@@ -35,6 +39,62 @@ async fn create_subscription(
 #[tauri::command]
 async fn delete_subscription(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
     db::subscriptions::delete(&state.pool, id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ---- payment methods ----
+
+#[tauri::command]
+async fn list_payment_methods(state: State<'_, AppState>) -> Result<Vec<PaymentMethod>, String> {
+    db::payment_methods::list(&state.pool)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_payment_method(
+    state: State<'_, AppState>,
+    input: NewPaymentMethod,
+) -> Result<PaymentMethod, String> {
+    let pm = input.into_payment_method();
+    db::payment_methods::insert(&state.pool, &pm)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(pm)
+}
+
+#[tauri::command]
+async fn delete_payment_method(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
+    db::payment_methods::delete(&state.pool, id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ---- categories ----
+
+#[tauri::command]
+async fn list_categories(state: State<'_, AppState>) -> Result<Vec<Category>, String> {
+    db::categories::list(&state.pool)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_category(
+    state: State<'_, AppState>,
+    input: NewCategory,
+) -> Result<Category, String> {
+    let cat = input.into_category();
+    db::categories::insert(&state.pool, &cat)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(cat)
+}
+
+#[tauri::command]
+async fn delete_category(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
+    db::categories::delete(&state.pool, id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -68,6 +128,12 @@ pub fn run() {
             list_subscriptions,
             create_subscription,
             delete_subscription,
+            list_payment_methods,
+            create_payment_method,
+            delete_payment_method,
+            list_categories,
+            create_category,
+            delete_category,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

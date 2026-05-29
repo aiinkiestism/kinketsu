@@ -1,9 +1,13 @@
 <script lang="ts">
 	import '../app.css';
+	import { onMount } from 'svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import BackgroundBlobs from '$lib/components/BackgroundBlobs.svelte';
+	import { i18n } from '$lib/i18n.svelte';
 
 	let { children } = $props();
+
+	onMount(() => i18n.init());
 </script>
 
 <svelte:head>

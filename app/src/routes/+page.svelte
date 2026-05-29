@@ -1,23 +1,30 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { subscriptions } from '$lib/stores/subscriptions.svelte';
-	import type { BillingCycle } from '$lib/types';
+	import { paymentMethods } from '$lib/stores/payment_methods.svelte';
+	import { categories } from '$lib/stores/categories.svelte';
+	import { i18n, t, tn } from '$lib/i18n.svelte';
+	import { PAYMENT_METHOD_KINDS, type BillingCycle, type PaymentMethodKind } from '$lib/types';
 
+	// Subscription form
 	let showForm = $state(false);
 	let formName = $state('');
 	let formAmount = $state<number>(0);
 	let formCurrency = $state('JPY');
 	let formCycle = $state<BillingCycle>('monthly');
+	let formPaymentMethodId = $state('');
+	let formCategoryId = $state('');
 
 	function resetForm() {
 		formName = '';
 		formAmount = 0;
 		formCurrency = 'JPY';
 		formCycle = 'monthly';
+		formPaymentMethodId = '';
+		formCategoryId = '';
 	}
 
 	function toMinor(amount: number, currency: string): number {
-		// JPY has no fractional unit; everything else assumes 1/100 minor units.
 		return currency === 'JPY' ? Math.round(amount) : Math.round(amount * 100);
 	}
 
@@ -27,7 +34,7 @@
 
 	function formatMoney(amount_minor: number, currency: string): string {
 		try {
-			return new Intl.NumberFormat('ja-JP', {
+			return new Intl.NumberFormat(i18n.bcp47, {
 				style: 'currency',
 				currency,
 				maximumFractionDigits: currency === 'JPY' ? 0 : 2
@@ -46,15 +53,6 @@
 		custom: 1
 	};
 
-	const CYCLE_LABEL: Record<BillingCycle, string> = {
-		weekly: '週次',
-		monthly: '月次',
-		quarterly: '四半期',
-		semi_annual: '半年',
-		annual: '年次',
-		custom: 'カスタム'
-	};
-
 	function monthlyEquivalentMinor(amount_minor: number, cycle: BillingCycle): number {
 		return amount_minor / CYCLE_MONTHS[cycle];
 	}
@@ -67,7 +65,10 @@
 
 	let activeCount = $derived(subscriptions.items.filter((s) => s.status === 'active').length);
 
-	async function handleAdd(e: SubmitEvent) {
+	let pmById = $derived(new Map(paymentMethods.items.map((p) => [p.id, p])));
+	let catById = $derived(new Map(categories.items.map((c) => [c.id, c])));
+
+	async function handleAddSubscription(e: SubmitEvent) {
 		e.preventDefault();
 		if (!formName.trim()) return;
 		try {
@@ -80,65 +81,102 @@
 				billing_cycle: formCycle,
 				next_billing_date: null,
 				started_at: null,
-				payment_method_id: null,
-				category_id: null,
+				payment_method_id: formPaymentMethodId || null,
+				category_id: formCategoryId || null,
 				status: null,
 				notes: null
 			});
 			showForm = false;
 			resetForm();
 		} catch {
-			// store.error is already set; surfaced by the error banner below.
+			/* store.error surfaced by banner */
 		}
 	}
 
-	onMount(() => subscriptions.load());
+	// Manage section
+	let showManage = $state(false);
+	let pmName = $state('');
+	let pmKind = $state<PaymentMethodKind>('credit_card');
+	let catName = $state('');
+
+	async function handleAddPaymentMethod(e: SubmitEvent) {
+		e.preventDefault();
+		if (!pmName.trim()) return;
+		try {
+			await paymentMethods.create({
+				name: pmName.trim(),
+				kind: pmKind,
+				last4: null,
+				color: null,
+				icon: null
+			});
+			pmName = '';
+			pmKind = 'credit_card';
+		} catch {
+			/* error surfaced via store */
+		}
+	}
+
+	async function handleAddCategory(e: SubmitEvent) {
+		e.preventDefault();
+		if (!catName.trim()) return;
+		try {
+			await categories.create({
+				name: catName.trim(),
+				icon: null,
+				color: null
+			});
+			catName = '';
+		} catch {
+			/* error surfaced via store */
+		}
+	}
+
+	onMount(() => {
+		subscriptions.load();
+		paymentMethods.load();
+		categories.load();
+	});
 </script>
 
 <div class="container">
 	<header class="title">
-		<h1>金欠<span class="kana">きんけつ</span></h1>
-		<p class="tagline">サブスクの全貌、メールから。</p>
+		<h1>kinketsu</h1>
+		<p class="tagline">{t('tagline')}</p>
 	</header>
 
 	<section class="grid">
 		<article class="glass card">
-			<h2>月額換算合計 (JPY)</h2>
-			<p class="big">
-				{new Intl.NumberFormat('ja-JP', {
-					style: 'currency',
-					currency: 'JPY',
-					maximumFractionDigits: 0
-				}).format(monthlyTotalJpy)}
-			</p>
-			<p class="muted">{activeCount} active subscription{activeCount === 1 ? '' : 's'}</p>
+			<h2>{t('dashboard.monthly_total')}</h2>
+			<p class="big">{formatMoney(monthlyTotalJpy, 'JPY')}</p>
+			<p class="muted">{tn('dashboard.active', activeCount)}</p>
 		</article>
 		<article class="glass card">
-			<h2>このあと請求</h2>
-			<p class="muted">no upcoming charges scheduled</p>
+			<h2>{t('dashboard.upcoming')}</h2>
+			<p class="muted">{t('dashboard.upcoming_empty')}</p>
 		</article>
 	</section>
 
 	<section class="list-section">
 		<div class="list-header">
-			<h2>登録済みサブスク</h2>
-			<button class="glass-subtle add-btn" onclick={() => (showForm = !showForm)}>
-				{showForm ? 'キャンセル' : '+ 追加'}
+			<h2>{t('subs.heading')}</h2>
+			<button class="glass-subtle pill-btn" onclick={() => (showForm = !showForm)}>
+				{showForm ? t('subs.cancel') : t('subs.add')}
 			</button>
 		</div>
 
 		{#if showForm}
-			<form class="glass form" onsubmit={handleAdd}>
+			<form class="glass form" onsubmit={handleAddSubscription}>
 				<label>
-					<span>名前</span>
-					<input bind:value={formName} placeholder="e.g. Netflix" required />
+					<span>{t('form.name')}</span>
+					<input bind:value={formName} placeholder={t('form.name_placeholder')} required />
 				</label>
 				<label>
-					<span>金額</span>
+					<span>{t('form.amount')}</span>
 					<input type="number" bind:value={formAmount} min="0" step="1" required />
 				</label>
 				<label>
-					<span>通貨</span>
+					<span>{t('form.currency')}</span>
 					<select bind:value={formCurrency}>
 						<option value="JPY">JPY</option>
 						<option value="USD">USD</option>
@@ -147,47 +185,139 @@
 					</select>
 				</label>
 				<label>
-					<span>請求サイクル</span>
+					<span>{t('form.billing_cycle')}</span>
 					<select bind:value={formCycle}>
-						<option value="weekly">週次</option>
-						<option value="monthly">月次</option>
-						<option value="quarterly">四半期</option>
-						<option value="semi_annual">半年</option>
-						<option value="annual">年次</option>
+						<option value="weekly">{t('cycle.weekly')}</option>
+						<option value="monthly">{t('cycle.monthly')}</option>
+						<option value="quarterly">{t('cycle.quarterly')}</option>
+						<option value="semi_annual">{t('cycle.semi_annual')}</option>
+						<option value="annual">{t('cycle.annual')}</option>
 					</select>
 				</label>
-				<button type="submit" class="submit">登録</button>
+				<label>
+					<span>{t('subs.payment_method')}</span>
+					<select bind:value={formPaymentMethodId}>
+						<option value="">{t('subs.none')}</option>
+						{#each paymentMethods.items as pm (pm.id)}
+							<option value={pm.id}>{pm.name}</option>
+						{/each}
+					</select>
+				</label>
+				<label>
+					<span>{t('subs.category')}</span>
+					<select bind:value={formCategoryId}>
+						<option value="">{t('subs.none')}</option>
+						{#each categories.items as cat (cat.id)}
+							<option value={cat.id}>{cat.name}</option>
+						{/each}
+					</select>
+				</label>
+				<button type="submit" class="submit">{t('form.submit')}</button>
 			</form>
 		{/if}
 
 		{#if subscriptions.error}
-			<p class="error">エラー: {subscriptions.error}</p>
+			<p class="error">{t('common.error')}: {subscriptions.error}</p>
 		{/if}
 
 		{#if subscriptions.loading}
-			<p class="muted">読み込み中...</p>
+			<p class="muted">{t('common.loading')}</p>
 		{:else if subscriptions.items.length === 0}
 			<article class="glass card empty">
-				<p class="muted">まだサブスクが登録されていません。「+ 追加」から最初の1件を。</p>
+				<p class="muted">{t('subs.empty')}</p>
 			</article>
 		{:else}
 			<ul class="sub-list">
 				{#each subscriptions.items as sub (sub.id)}
+					{@const pm = sub.payment_method_id ? pmById.get(sub.payment_method_id) : undefined}
+					{@const cat = sub.category_id ? catById.get(sub.category_id) : undefined}
 					<li class="glass sub-row">
 						<div class="sub-main">
 							<span class="sub-name">{sub.name}</span>
-							{#if sub.plan}<span class="sub-plan">{sub.plan}</span>{/if}
+							{#if pm || cat || sub.plan}
+								<span class="sub-meta">
+									{#if pm}<span>{pm.name}</span>{/if}
+									{#if pm && (cat || sub.plan)}<span class="sep">·</span>{/if}
+									{#if cat}<span>{cat.name}</span>{/if}
+									{#if cat && sub.plan}<span class="sep">·</span>{/if}
+									{#if sub.plan}<span>{sub.plan}</span>{/if}
+								</span>
+							{/if}
 						</div>
-						<span class="sub-cycle">{CYCLE_LABEL[sub.billing_cycle]}</span>
+						<span class="sub-cycle">{t(`cycle.${sub.billing_cycle}`)}</span>
 						<span class="sub-amount">{formatMoney(sub.amount_minor, sub.currency)}</span>
 						<button
 							class="del"
 							onclick={() => subscriptions.remove(sub.id)}
-							aria-label="削除"
+							aria-label={t('common.delete')}
 						>×</button>
 					</li>
 				{/each}
 			</ul>
+		{/if}
+	</section>
+
+	<section class="manage-section">
+		<button class="glass-subtle pill-btn manage-toggle" onclick={() => (showManage = !showManage)}>
+			{t('manage.heading')} <span class="caret">{showManage ? '▾' : '▸'}</span>
+		</button>
+
+		{#if showManage}
+			<div class="manage-grid">
+				<article class="glass manage-block">
+					<h3>{t('manage.payment_methods')}</h3>
+					{#if paymentMethods.items.length === 0}
+						<p class="muted small">{t('manage.empty_pm')}</p>
+					{:else}
+						<ul class="manage-list">
+							{#each paymentMethods.items as pm (pm.id)}
+								<li>
+									<span class="m-name">{pm.name}</span>
+									<span class="muted small">{t(`kind.${pm.kind}`)}</span>
+									<button
+										class="del-small"
+										onclick={() => paymentMethods.remove(pm.id)}
+										aria-label={t('common.delete')}
+									>×</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+					<form class="manage-add" onsubmit={handleAddPaymentMethod}>
+						<input bind:value={pmName} placeholder={t('form.name')} required />
+						<select bind:value={pmKind}>
+							{#each PAYMENT_METHOD_KINDS as k (k)}
+								<option value={k}>{t(`kind.${k}`)}</option>
+							{/each}
+						</select>
+						<button type="submit" class="add-mini">+</button>
+					</form>
+				</article>
+
+				<article class="glass manage-block">
+					<h3>{t('manage.categories')}</h3>
+					{#if categories.items.length === 0}
+						<p class="muted small">{t('manage.empty_cat')}</p>
+					{:else}
+						<ul class="manage-list">
+							{#each categories.items as cat (cat.id)}
+								<li>
+									<span class="m-name">{cat.name}</span>
+									<button
+										class="del-small"
+										onclick={() => categories.remove(cat.id)}
+										aria-label={t('common.delete')}
+									>×</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+					<form class="manage-add" onsubmit={handleAddCategory}>
+						<input bind:value={catName} placeholder={t('form.name')} required />
+						<button type="submit" class="add-mini">+</button>
+					</form>
+				</article>
+			</div>
 		{/if}
 	</section>
 </div>
@@ -202,13 +332,13 @@
 		font-size: clamp(2.5rem, 4vw, 4rem);
 		font-weight: 800;
 		margin: 0;
-		letter-spacing: -0.02em;
-	}
-	.title .kana {
-		font-size: 0.4em;
-		font-weight: 500;
-		margin-left: 0.5em;
-		opacity: 0.5;
+		letter-spacing: -0.03em;
+		font-family:
+			ui-sans-serif,
+			system-ui,
+			-apple-system,
+			'Inter',
+			sans-serif;
 	}
 	.title .tagline {
 		margin: 0.5rem 0 3rem;
@@ -245,7 +375,8 @@
 		color: var(--kk-text-muted);
 		font-size: 0.9rem;
 	}
-	.list-section h2 {
+	.list-section h2,
+	.manage-section h3 {
 		font-size: 1.05rem;
 		font-weight: 600;
 		margin: 0;
@@ -256,13 +387,14 @@
 		align-items: center;
 		margin-bottom: 1rem;
 	}
-	.add-btn {
+	.pill-btn {
 		border: none;
 		padding: 0.5rem 1rem;
 		border-radius: var(--kk-radius-sm);
 		color: var(--kk-text-primary);
 		cursor: pointer;
 		font-size: 0.9rem;
+		font-family: inherit;
 	}
 	.form {
 		display: grid;
@@ -319,13 +451,20 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.15rem;
+		min-width: 0;
 	}
 	.sub-name {
 		font-weight: 600;
 	}
-	.sub-plan {
+	.sub-meta {
+		display: inline-flex;
+		gap: 0.4rem;
+		flex-wrap: wrap;
 		font-size: 0.8rem;
 		color: var(--kk-text-muted);
+	}
+	.sub-meta .sep {
+		opacity: 0.5;
 	}
 	.sub-cycle {
 		font-size: 0.8rem;
@@ -358,8 +497,99 @@
 		margin: 0 0 1rem;
 		font-size: 0.9rem;
 	}
+
+	/* Manage section */
+	.manage-section {
+		margin-top: 2.5rem;
+	}
+	.manage-toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.manage-toggle .caret {
+		font-size: 0.75rem;
+		opacity: 0.7;
+	}
+	.manage-grid {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 1rem;
+		margin-top: 1rem;
+	}
+	.manage-block {
+		padding: 1.25rem;
+		border-radius: var(--kk-radius-md);
+		display: flex;
+		flex-direction: column;
+		gap: 0.85rem;
+	}
+	.manage-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+	.manage-list li {
+		display: grid;
+		grid-template-columns: 1fr auto auto;
+		gap: 0.75rem;
+		align-items: center;
+		padding: 0.45rem 0.65rem;
+		background: var(--kk-surface-2);
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+	}
+	.m-name {
+		font-size: 0.95rem;
+	}
+	.small {
+		font-size: 0.8rem;
+	}
+	.del-small {
+		border: none;
+		background: transparent;
+		color: var(--kk-text-muted);
+		cursor: pointer;
+		font-size: 1.1rem;
+		line-height: 1;
+		padding: 0;
+		width: 1.25rem;
+		height: 1.25rem;
+	}
+	.del-small:hover {
+		color: var(--color-accent-mochi);
+	}
+	.manage-add {
+		display: grid;
+		grid-template-columns: 1fr auto auto;
+		gap: 0.5rem;
+	}
+	.manage-add input,
+	.manage-add select {
+		padding: 0.5rem 0.65rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		background: var(--kk-surface-2);
+		color: var(--kk-text-primary);
+		font-size: 0.9rem;
+		font-family: inherit;
+	}
+	.add-mini {
+		border: 1px solid var(--kk-stroke);
+		background: var(--color-accent-sora);
+		color: oklch(0.15 0.05 245);
+		border-radius: var(--kk-radius-sm);
+		font-weight: 700;
+		cursor: pointer;
+		width: 2rem;
+	}
+
 	@media (max-width: 640px) {
-		.grid {
+		.grid,
+		.manage-grid {
 			grid-template-columns: 1fr;
 		}
 		.form {
@@ -373,6 +603,12 @@
 		}
 		.sub-cycle {
 			display: none;
+		}
+		.manage-add {
+			grid-template-columns: 1fr auto;
+		}
+		.manage-add select {
+			grid-column: span 2;
 		}
 	}
 </style>

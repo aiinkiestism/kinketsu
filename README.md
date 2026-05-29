@@ -44,15 +44,16 @@ kinketsu/
 ## v0.1 scope
 
 - [x] Workspace + UI shell scaffolding
-- [ ] Manual subscription CRUD (in progress)
-- [ ] Categories + payment methods
-- [ ] Multi-currency with daily exchange-rate cache
-- [ ] Renewal reminder notifications
-- [ ] iCalendar (`.ics`) export of renewal dates
-- [ ] Gmail OAuth + LLM-based receipt extraction
-- [ ] PayPal OAuth (補完 for PayPal-routed overseas subs)
-- [ ] Past-scan UI: year / month multi-select to bound LLM cost
-- [ ] Settings: LLM provider selection + API keys
+- [x] Manual subscription CRUD
+- [x] Categories + payment methods
+- [x] Settings: LLM provider selection + API keys (Claude / OpenAI / Gemini / Ollama / LM Studio)
+- [x] Multi-currency with daily exchange-rate cache (open.er-api.com, JPY-anchored conversion)
+- [x] iCalendar (`.ics`) export of renewal dates
+- [x] Renewal reminder notifications (system, 7-day window, daily background check)
+- [x] Past-scan UI: year / month multi-select (`MonthRangeSelect`) driving Gmail scans
+- [x] Inbox / review queue for detected subscriptions (Confirm / Reject)
+- [x] Gmail OAuth + LLM-based receipt extraction (real Gmail API, paginated, dedupe)
+- [x] PayPal OAuth flow (Log In with PayPal); transaction scan stubbed pending Transaction Search API loop
 
 ## Out of scope (deliberately)
 

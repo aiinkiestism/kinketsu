@@ -29,6 +29,16 @@ class SubscriptionsStore {
 		}
 	}
 
+	async update(sub: Subscription) {
+		try {
+			await invoke('update_subscription', { sub });
+			await this.load();
+		} catch (e) {
+			this.error = String(e);
+			throw e;
+		}
+	}
+
 	async remove(id: string) {
 		try {
 			await invoke('delete_subscription', { id });

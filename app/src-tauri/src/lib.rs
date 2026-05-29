@@ -43,6 +43,18 @@ async fn create_subscription(
 }
 
 #[tauri::command]
+async fn update_subscription(
+    state: State<'_, AppState>,
+    sub: Subscription,
+) -> Result<(), String> {
+    let mut updated = sub;
+    updated.updated_at = chrono::Utc::now();
+    db::subscriptions::update(&state.pool, &updated)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn delete_subscription(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
     db::subscriptions::delete(&state.pool, id)
         .await
@@ -597,6 +609,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_subscriptions,
             create_subscription,
+            update_subscription,
             delete_subscription,
             list_payment_methods,
             create_payment_method,

@@ -24,6 +24,8 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'dashboard.upcoming': 'Upcoming charges',
 		'dashboard.upcoming_empty': 'No upcoming charges scheduled.',
 		'dashboard.export_ics': 'Export .ics',
+		'dashboard.unconvertible_one': '1 subscription has no rate yet — refresh in Settings.',
+		'dashboard.unconvertible_other': '{count} subscriptions have no rate yet — refresh in Settings.',
 
 		'subs.heading': 'Subscriptions',
 		'subs.add': '+ Add',
@@ -38,7 +40,21 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'form.amount': 'Amount',
 		'form.currency': 'Currency',
 		'form.billing_cycle': 'Billing cycle',
+		'form.status': 'Status',
+		'form.plan': 'Plan',
+		'form.next_billing_date': 'Next billing date',
+		'form.started_at': 'Started at',
+		'form.notes': 'Notes',
 		'form.submit': 'Save',
+		'form.update': 'Update',
+		'form.edit_heading': 'Edit subscription',
+
+		'sub_status.active': 'Active',
+		'sub_status.trial': 'Trial',
+		'sub_status.paused': 'Paused',
+		'sub_status.cancelled': 'Cancelled',
+
+		'common.edit': 'Edit',
 
 		'cycle.weekly': 'Weekly',
 		'cycle.monthly': 'Monthly',
@@ -186,6 +202,8 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'dashboard.upcoming': 'このあと請求',
 		'dashboard.upcoming_empty': '予定された請求はありません。',
 		'dashboard.export_ics': 'カレンダー (.ics) 出力',
+		'dashboard.unconvertible_one': '1 件のサブスクにレートが無いため集計に含まれていません。',
+		'dashboard.unconvertible_other': '{count} 件のサブスクにレートが無いため集計に含まれていません。',
 
 		'subs.heading': 'サブスク一覧',
 		'subs.add': '+ 追加',
@@ -200,7 +218,21 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'form.amount': '金額',
 		'form.currency': '通貨',
 		'form.billing_cycle': '請求サイクル',
+		'form.status': 'ステータス',
+		'form.plan': 'プラン',
+		'form.next_billing_date': '次回請求日',
+		'form.started_at': '開始日',
+		'form.notes': 'メモ',
 		'form.submit': '登録',
+		'form.update': '更新',
+		'form.edit_heading': 'サブスクを編集',
+
+		'sub_status.active': 'アクティブ',
+		'sub_status.trial': 'トライアル',
+		'sub_status.paused': '一時停止',
+		'sub_status.cancelled': 'キャンセル',
+
+		'common.edit': '編集',
 
 		'cycle.weekly': '週次',
 		'cycle.monthly': '月次',

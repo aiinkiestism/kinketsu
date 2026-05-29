@@ -23,6 +23,46 @@ export type PaymentMethodKind =
 	| 'crypto'
 	| 'other';
 
+export const CURRENCIES: readonly string[] = [
+	'JPY',
+	'USD',
+	'EUR',
+	'GBP',
+	'CHF',
+	'CAD',
+	'AUD',
+	'NZD',
+	'CNY',
+	'HKD',
+	'SGD',
+	'KRW',
+	'TWD',
+	'INR',
+	'BRL',
+	'MXN',
+	'ZAR',
+	'SEK',
+	'NOK',
+	'DKK',
+	'PLN',
+	'CZK',
+	'HUF',
+	'TRY',
+	'THB',
+	'IDR',
+	'PHP',
+	'MYR',
+	'VND',
+	'AED'
+] as const;
+
+export const SUBSCRIPTION_STATUSES: SubscriptionStatus[] = [
+	'active',
+	'trial',
+	'paused',
+	'cancelled'
+];
+
 export const PAYMENT_METHOD_KINDS: PaymentMethodKind[] = [
 	'credit_card',
 	'debit_card',

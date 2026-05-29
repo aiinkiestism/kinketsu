@@ -6,7 +6,15 @@
 	import { categories } from '$lib/stores/categories.svelte';
 	import { exchangeRates } from '$lib/stores/exchange_rates.svelte';
 	import { i18n, t, tn } from '$lib/i18n.svelte';
-	import { PAYMENT_METHOD_KINDS, type BillingCycle, type PaymentMethodKind } from '$lib/types';
+	import {
+		CURRENCIES,
+		PAYMENT_METHOD_KINDS,
+		SUBSCRIPTION_STATUSES,
+		type BillingCycle,
+		type PaymentMethodKind,
+		type Subscription,
+		type SubscriptionStatus
+	} from '$lib/types';
 
 	let exporting = $state(false);
 
@@ -30,22 +38,59 @@
 		}
 	}
 
-	// Subscription form
+	// Subscription form (used for both create and edit)
 	let showForm = $state(false);
+	let editingSub = $state<Subscription | null>(null);
 	let formName = $state('');
 	let formAmount = $state<number>(0);
 	let formCurrency = $state('JPY');
 	let formCycle = $state<BillingCycle>('monthly');
+	let formStatus = $state<SubscriptionStatus>('active');
+	let formPlan = $state('');
+	let formNextBilling = $state('');
+	let formStartedAt = $state('');
+	let formNotes = $state('');
 	let formPaymentMethodId = $state('');
 	let formCategoryId = $state('');
 
 	function resetForm() {
+		editingSub = null;
 		formName = '';
 		formAmount = 0;
 		formCurrency = 'JPY';
 		formCycle = 'monthly';
+		formStatus = 'active';
+		formPlan = '';
+		formNextBilling = '';
+		formStartedAt = '';
+		formNotes = '';
 		formPaymentMethodId = '';
 		formCategoryId = '';
+	}
+
+	function openCreate() {
+		resetForm();
+		showForm = true;
+	}
+
+	function openEdit(sub: Subscription) {
+		editingSub = sub;
+		formName = sub.name;
+		formAmount = fromMinor(sub.amount_minor, sub.currency);
+		formCurrency = sub.currency;
+		formCycle = sub.billing_cycle;
+		formStatus = sub.status;
+		formPlan = sub.plan ?? '';
+		formNextBilling = sub.next_billing_date ?? '';
+		formStartedAt = sub.started_at ?? '';
+		formNotes = sub.notes ?? '';
+		formPaymentMethodId = sub.payment_method_id ?? '';
+		formCategoryId = sub.category_id ?? '';
+		showForm = true;
+		// Scroll the form into view
+		setTimeout(() => {
+			document.querySelector('.form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		}, 0);
 	}
 
 	function toMinor(amount: number, currency: string): number {
@@ -106,24 +151,48 @@
 	let pmById = $derived(new Map(paymentMethods.items.map((p) => [p.id, p])));
 	let catById = $derived(new Map(categories.items.map((c) => [c.id, c])));
 
-	async function handleAddSubscription(e: SubmitEvent) {
+	async function handleSubmitSubscription(e: SubmitEvent) {
 		e.preventDefault();
 		if (!formName.trim()) return;
+		const amount_minor = toMinor(formAmount, formCurrency);
+		const plan = formPlan.trim() || null;
+		const notes = formNotes.trim() || null;
+		const next_billing_date = formNextBilling.trim() || null;
+		const started_at = formStartedAt.trim() || null;
+		const payment_method_id = formPaymentMethodId || null;
+		const category_id = formCategoryId || null;
 		try {
-			await subscriptions.create({
-				name: formName.trim(),
-				service_icon: null,
-				plan: null,
-				amount_minor: toMinor(formAmount, formCurrency),
-				currency: formCurrency,
-				billing_cycle: formCycle,
-				next_billing_date: null,
-				started_at: null,
-				payment_method_id: formPaymentMethodId || null,
-				category_id: formCategoryId || null,
-				status: null,
-				notes: null
-			});
+			if (editingSub) {
+				await subscriptions.update({
+					...editingSub,
+					name: formName.trim(),
+					plan,
+					amount_minor,
+					currency: formCurrency,
+					billing_cycle: formCycle,
+					status: formStatus,
+					next_billing_date,
+					started_at,
+					payment_method_id,
+					category_id,
+					notes
+				});
+			} else {
+				await subscriptions.create({
+					name: formName.trim(),
+					service_icon: null,
+					plan,
+					amount_minor,
+					currency: formCurrency,
+					billing_cycle: formCycle,
+					next_billing_date,
+					started_at,
+					payment_method_id,
+					category_id,
+					status: formStatus,
+					notes
+				});
+			}
 			showForm = false;
 			resetForm();
 		} catch {
@@ -189,6 +258,9 @@
 			<h2>{t('dashboard.monthly_total')}</h2>
 			<p class="big">{formatMoney(monthlyTotalJpy, 'JPY')}</p>
 			<p class="muted">{tn('dashboard.active', activeCount)}</p>
+			{#if unconvertibleCount > 0}
+				<p class="muted small warn">{tn('dashboard.unconvertible', unconvertibleCount)}</p>
+			{/if}
 		</article>
 		<article class="glass card">
 			<h2>{t('dashboard.upcoming')}</h2>
@@ -207,29 +279,47 @@
 				>
 					{exporting ? t('common.loading') : t('dashboard.export_ics')}
 				</button>
-				<button class="glass-subtle pill-btn" onclick={() => (showForm = !showForm)}>
+				<button
+					class="glass-subtle pill-btn"
+					onclick={() => {
+						if (showForm) {
+							showForm = false;
+							resetForm();
+						} else {
+							openCreate();
+						}
+					}}
+				>
 					{showForm ? t('subs.cancel') : t('subs.add')}
 				</button>
 			</div>
 		</div>
 
 		{#if showForm}
-			<form class="glass form" onsubmit={handleAddSubscription}>
+			<form class="glass form" onsubmit={handleSubmitSubscription}>
+				{#if editingSub}
+					<p class="form-heading">{t('form.edit_heading')}</p>
+				{/if}
 				<label>
 					<span>{t('form.name')}</span>
 					<input bind:value={formName} placeholder={t('form.name_placeholder')} required />
 				</label>
 				<label>
 					<span>{t('form.amount')}</span>
-					<input type="number" bind:value={formAmount} min="0" step="1" required />
+					<input
+						type="number"
+						bind:value={formAmount}
+						min="0"
+						step={formCurrency === 'JPY' ? '1' : '0.01'}
+						required
+					/>
 				</label>
 				<label>
 					<span>{t('form.currency')}</span>
 					<select bind:value={formCurrency}>
-						<option value="JPY">JPY</option>
-						<option value="USD">USD</option>
-						<option value="EUR">EUR</option>
-						<option value="GBP">GBP</option>
+						{#each CURRENCIES as cur (cur)}
+							<option value={cur}>{cur}</option>
+						{/each}
 					</select>
 				</label>
 				<label>
@@ -240,7 +330,28 @@
 						<option value="quarterly">{t('cycle.quarterly')}</option>
 						<option value="semi_annual">{t('cycle.semi_annual')}</option>
 						<option value="annual">{t('cycle.annual')}</option>
+						<option value="custom">{t('cycle.custom')}</option>
 					</select>
+				</label>
+				<label>
+					<span>{t('form.status')}</span>
+					<select bind:value={formStatus}>
+						{#each SUBSCRIPTION_STATUSES as s (s)}
+							<option value={s}>{t(`sub_status.${s}`)}</option>
+						{/each}
+					</select>
+				</label>
+				<label>
+					<span>{t('form.plan')}</span>
+					<input bind:value={formPlan} placeholder="e.g. Premium" />
+				</label>
+				<label>
+					<span>{t('form.next_billing_date')}</span>
+					<input type="date" bind:value={formNextBilling} />
+				</label>
+				<label>
+					<span>{t('form.started_at')}</span>
+					<input type="date" bind:value={formStartedAt} />
 				</label>
 				<label>
 					<span>{t('subs.payment_method')}</span>
@@ -260,7 +371,13 @@
 						{/each}
 					</select>
 				</label>
-				<button type="submit" class="submit">{t('form.submit')}</button>
+				<label class="span-2">
+					<span>{t('form.notes')}</span>
+					<textarea bind:value={formNotes} rows="2"></textarea>
+				</label>
+				<button type="submit" class="submit">
+					{editingSub ? t('form.update') : t('form.submit')}
+				</button>
 			</form>
 		{/if}
 
@@ -294,6 +411,12 @@
 						</div>
 						<span class="sub-cycle">{t(`cycle.${sub.billing_cycle}`)}</span>
 						<span class="sub-amount">{formatMoney(sub.amount_minor, sub.currency)}</span>
+						<button
+							class="edit"
+							onclick={() => openEdit(sub)}
+							aria-label={t('common.edit')}
+							title={t('common.edit')}
+						>✎</button>
 						<button
 							class="del"
 							onclick={() => subscriptions.remove(sub.id)}
@@ -498,8 +621,8 @@
 	}
 	.sub-row {
 		display: grid;
-		grid-template-columns: 1fr auto auto auto;
-		gap: 1rem;
+		grid-template-columns: 1fr auto auto auto auto;
+		gap: 0.85rem;
 		align-items: center;
 		padding: 0.85rem 1.25rem;
 		border-radius: var(--kk-radius-sm);
@@ -531,19 +654,51 @@
 		font-variant-numeric: tabular-nums;
 		font-weight: 600;
 	}
-	.del {
+	.del,
+	.edit {
 		border: none;
 		background: transparent;
 		color: var(--kk-text-muted);
 		cursor: pointer;
-		font-size: 1.5rem;
+		font-size: 1.1rem;
 		line-height: 1;
 		padding: 0;
 		width: 1.5rem;
 		height: 1.5rem;
 	}
+	.del {
+		font-size: 1.5rem;
+	}
 	.del:hover {
 		color: var(--color-accent-mochi);
+	}
+	.edit:hover {
+		color: var(--color-accent-sora);
+	}
+	.warn {
+		color: var(--color-accent-yuzu);
+	}
+	.form-heading {
+		grid-column: span 2;
+		margin: 0;
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--kk-text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+	.form textarea {
+		padding: 0.6rem 0.75rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		background: var(--kk-surface-2);
+		color: var(--kk-text-primary);
+		font-size: 0.95rem;
+		font-family: inherit;
+		resize: vertical;
+	}
+	.form .span-2 {
+		grid-column: span 2;
 	}
 	.empty {
 		padding: 2rem;
@@ -656,7 +811,7 @@
 			grid-column: span 1;
 		}
 		.sub-row {
-			grid-template-columns: 1fr auto auto;
+			grid-template-columns: 1fr auto auto auto;
 		}
 		.sub-cycle {
 			display: none;

@@ -119,6 +119,16 @@ async fn set_llm_config(state: State<'_, AppState>, config: LlmConfig) -> Result
         .map_err(|e| e.to_string())
 }
 
+// ---- iCalendar export ----
+
+#[tauri::command]
+async fn export_subscriptions_ics(state: State<'_, AppState>) -> Result<String, String> {
+    let subs = db::subscriptions::list(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(kinketsu_core::ics::export_subscriptions(&subs))
+}
+
 // ---- Exchange rates ----
 
 #[tauri::command]
@@ -281,6 +291,7 @@ pub fn run() {
             reject_detection_event,
             refresh_exchange_rates,
             list_exchange_rates,
+            export_subscriptions_ics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

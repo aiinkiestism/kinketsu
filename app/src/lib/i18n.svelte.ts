@@ -22,6 +22,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'dashboard.active_other': '{count} active subscriptions',
 		'dashboard.upcoming': 'Upcoming charges',
 		'dashboard.upcoming_empty': 'No upcoming charges scheduled.',
+		'dashboard.export_ics': 'Export .ics',
 
 		'subs.heading': 'Subscriptions',
 		'subs.add': '+ Add',
@@ -109,6 +110,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'dashboard.active_other': 'アクティブ {count} 件',
 		'dashboard.upcoming': 'このあと請求',
 		'dashboard.upcoming_empty': '予定された請求はありません。',
+		'dashboard.export_ics': 'カレンダー (.ics) 出力',
 
 		'subs.heading': 'サブスク一覧',
 		'subs.add': '+ 追加',

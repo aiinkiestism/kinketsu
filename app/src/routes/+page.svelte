@@ -1,11 +1,34 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { invoke } from '@tauri-apps/api/core';
 	import { subscriptions } from '$lib/stores/subscriptions.svelte';
 	import { paymentMethods } from '$lib/stores/payment_methods.svelte';
 	import { categories } from '$lib/stores/categories.svelte';
 	import { exchangeRates } from '$lib/stores/exchange_rates.svelte';
 	import { i18n, t, tn } from '$lib/i18n.svelte';
 	import { PAYMENT_METHOD_KINDS, type BillingCycle, type PaymentMethodKind } from '$lib/types';
+
+	let exporting = $state(false);
+
+	async function handleExportIcs() {
+		exporting = true;
+		try {
+			const text = await invoke<string>('export_subscriptions_ics');
+			const blob = new Blob([text], { type: 'text/calendar' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `kinketsu-${new Date().toISOString().slice(0, 10)}.ics`;
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			console.error(e);
+		} finally {
+			exporting = false;
+		}
+	}
 
 	// Subscription form
 	let showForm = $state(false);
@@ -176,9 +199,18 @@
 	<section class="list-section">
 		<div class="list-header">
 			<h2>{t('subs.heading')}</h2>
-			<button class="glass-subtle pill-btn" onclick={() => (showForm = !showForm)}>
-				{showForm ? t('subs.cancel') : t('subs.add')}
-			</button>
+			<div class="header-actions">
+				<button
+					class="glass-subtle pill-btn"
+					onclick={handleExportIcs}
+					disabled={exporting || subscriptions.items.length === 0}
+				>
+					{exporting ? t('common.loading') : t('dashboard.export_ics')}
+				</button>
+				<button class="glass-subtle pill-btn" onclick={() => (showForm = !showForm)}>
+					{showForm ? t('subs.cancel') : t('subs.add')}
+				</button>
+			</div>
 		</div>
 
 		{#if showForm}
@@ -411,6 +443,15 @@
 		cursor: pointer;
 		font-size: 0.9rem;
 		font-family: inherit;
+	}
+	.pill-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.header-actions {
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
 	}
 	.form {
 		display: grid;

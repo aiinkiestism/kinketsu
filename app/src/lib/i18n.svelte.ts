@@ -13,6 +13,9 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 	en: {
 		tagline: 'Every subscription, from your inbox.',
 
+		'nav.dashboard': 'Dashboard',
+		'nav.settings': 'Settings',
+
 		'dashboard.monthly_total': 'Monthly equivalent total (JPY)',
 		'dashboard.active_one': '1 active subscription',
 		'dashboard.active_other': '{count} active subscriptions',
@@ -58,12 +61,26 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'kind.crypto': 'Crypto',
 		'kind.other': 'Other',
 
+		'settings.heading': 'Settings',
+		'settings.llm_heading': 'LLM provider',
+		'settings.llm_description':
+			'kinketsu uses an LLM to read your subscription receipts. Pick a provider and paste your credentials — Ollama and LM Studio run locally so nothing leaves your machine.',
+		'settings.provider': 'Provider',
+		'settings.api_key': 'API key',
+		'settings.endpoint': 'Endpoint',
+		'settings.model': 'Model',
+		'settings.save': 'Save',
+		'settings.saved': 'Saved.',
+
 		'common.delete': 'Delete',
 		'common.error': 'Error',
 		'common.loading': 'Loading…'
 	},
 	ja: {
 		tagline: 'サブスクの全貌、メールから。',
+
+		'nav.dashboard': 'ダッシュボード',
+		'nav.settings': '設定',
 
 		'dashboard.monthly_total': '月額換算合計 (JPY)',
 		'dashboard.active_one': 'アクティブ 1 件',
@@ -109,6 +126,17 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'kind.play_store': 'Google Play',
 		'kind.crypto': '暗号資産',
 		'kind.other': 'その他',
+
+		'settings.heading': '設定',
+		'settings.llm_heading': 'LLM プロバイダー',
+		'settings.llm_description':
+			'kinketsu はメール明細の読み取りに LLM を使います。プロバイダーを選択して認証情報を入力してください。Ollama と LM Studio はローカル実行なので情報は端末から出ません。',
+		'settings.provider': 'プロバイダー',
+		'settings.api_key': 'API キー',
+		'settings.endpoint': 'エンドポイント',
+		'settings.model': 'モデル',
+		'settings.save': '保存',
+		'settings.saved': '保存しました。',
 
 		'common.delete': '削除',
 		'common.error': 'エラー',

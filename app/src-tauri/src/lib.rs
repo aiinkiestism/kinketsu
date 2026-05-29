@@ -4,6 +4,7 @@
 //! SvelteKit frontend calls via `@tauri-apps/api/core::invoke`.
 
 use kinketsu_core::db;
+use kinketsu_core::llm::LlmConfig;
 use kinketsu_core::models::{
     Category, NewCategory, NewPaymentMethod, NewSubscription, PaymentMethod, Subscription,
 };
@@ -99,6 +100,22 @@ async fn delete_category(state: State<'_, AppState>, id: Uuid) -> Result<(), Str
         .map_err(|e| e.to_string())
 }
 
+// ---- LLM provider configuration ----
+
+#[tauri::command]
+async fn get_llm_config(state: State<'_, AppState>) -> Result<Option<LlmConfig>, String> {
+    db::settings::get::<LlmConfig>(&state.pool, db::settings::keys::LLM_CONFIG)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_llm_config(state: State<'_, AppState>, config: LlmConfig) -> Result<(), String> {
+    db::settings::set(&state.pool, db::settings::keys::LLM_CONFIG, &config)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -134,6 +151,8 @@ pub fn run() {
             list_categories,
             create_category,
             delete_category,
+            get_llm_config,
+            set_llm_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

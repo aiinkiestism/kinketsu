@@ -17,11 +17,28 @@ pub mod openai;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "provider", rename_all = "snake_case")]
 pub enum LlmConfig {
-    Claude { api_key: String, model: String },
-    OpenAi { api_key: String, model: String },
-    Gemini { api_key: String, model: String },
-    Ollama { endpoint: String, model: String },
-    LmStudio { endpoint: String, model: String },
+    Claude {
+        api_key: String,
+        model: String,
+    },
+    #[serde(rename = "openai")]
+    OpenAi {
+        api_key: String,
+        model: String,
+    },
+    Gemini {
+        api_key: String,
+        model: String,
+    },
+    Ollama {
+        endpoint: String,
+        model: String,
+    },
+    #[serde(rename = "lmstudio")]
+    LmStudio {
+        endpoint: String,
+        model: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

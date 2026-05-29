@@ -3,6 +3,7 @@
 //! Holds the SQLite pool in app state and exposes the v0.1 commands the
 //! SvelteKit frontend calls via `@tauri-apps/api/core::invoke`.
 
+use kinketsu_core::currency::ExchangeRate;
 use kinketsu_core::db;
 use kinketsu_core::llm::{LlmClient, LlmConfig};
 use kinketsu_core::models::{
@@ -114,6 +115,35 @@ async fn get_llm_config(state: State<'_, AppState>) -> Result<Option<LlmConfig>,
 #[tauri::command]
 async fn set_llm_config(state: State<'_, AppState>, config: LlmConfig) -> Result<(), String> {
     db::settings::set(&state.pool, db::settings::keys::LLM_CONFIG, &config)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ---- Exchange rates ----
+
+#[tauri::command]
+async fn refresh_exchange_rates(
+    state: State<'_, AppState>,
+    base: String,
+) -> Result<usize, String> {
+    let rates = kinketsu_core::currency::refresh_rates(&base)
+        .await
+        .map_err(|e| e.to_string())?;
+    let count = rates.len();
+    for r in &rates {
+        db::exchange_rates::upsert(&state.pool, r)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(count)
+}
+
+#[tauri::command]
+async fn list_exchange_rates(
+    state: State<'_, AppState>,
+    base: String,
+) -> Result<Vec<ExchangeRate>, String> {
+    db::exchange_rates::list_latest_for_base(&state.pool, &base)
         .await
         .map_err(|e| e.to_string())
 }
@@ -249,6 +279,8 @@ pub fn run() {
             list_detection_events,
             confirm_detection_event,
             reject_detection_event,
+            refresh_exchange_rates,
+            list_exchange_rates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

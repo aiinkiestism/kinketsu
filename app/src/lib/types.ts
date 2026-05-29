@@ -159,6 +159,15 @@ export interface ParsedSubscriptionHint {
 	charged_at: string | null;
 }
 
+// ---- Exchange rates ----
+
+export interface ExchangeRate {
+	base: string;
+	quote: string;
+	rate: number;
+	fetched_at: string;
+}
+
 // ---- Detection events ----
 
 export type DetectionSource = 'gmail' | 'paypal' | 'csv_import' | 'manual';

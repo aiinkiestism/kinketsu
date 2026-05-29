@@ -21,6 +21,23 @@ pub async fn latest(
     Ok(row)
 }
 
+/// Return the most-recent batch of rates for the given `base` (matching the
+/// single most-recent `fetched_at` timestamp). Empty when nothing has been
+/// refreshed yet.
+pub async fn list_latest_for_base(pool: &SqlitePool, base: &str) -> Result<Vec<ExchangeRate>> {
+    let rows = sqlx::query_as::<_, ExchangeRate>(
+        "SELECT base, quote, rate, fetched_at FROM exchange_rates
+         WHERE base = ?
+         AND fetched_at = (SELECT MAX(fetched_at) FROM exchange_rates WHERE base = ?)
+         ORDER BY quote",
+    )
+    .bind(base)
+    .bind(base)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 pub async fn upsert(pool: &SqlitePool, rate: &ExchangeRate) -> Result<()> {
     sqlx::query(
         "INSERT INTO exchange_rates (base, quote, rate, fetched_at)

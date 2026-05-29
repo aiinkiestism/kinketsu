@@ -73,6 +73,14 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.save': 'Save',
 		'settings.saved': 'Saved.',
 
+		'settings.rates_heading': 'Exchange rates',
+		'settings.rates_description':
+			'kinketsu caches exchange rates against JPY so the dashboard total reflects all active subscriptions, regardless of currency.',
+		'settings.rates_last': 'Last refreshed:',
+		'settings.rates_never': 'never',
+		'settings.rates_refresh': 'Refresh rates',
+		'settings.rates_count': '{count} rates cached',
+
 		'scan.heading': 'Scan a receipt',
 		'scan.description':
 			'Paste a subscription confirmation or renewal email below. The LLM you picked in Settings extracts the structured fields. Use this to validate your provider before connecting Gmail.',
@@ -151,6 +159,14 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.model': 'モデル',
 		'settings.save': '保存',
 		'settings.saved': '保存しました。',
+
+		'settings.rates_heading': '為替レート',
+		'settings.rates_description':
+			'kinketsu は為替レートをキャッシュして、ダッシュボードの合計を通貨横断で表示します。',
+		'settings.rates_last': '最終更新:',
+		'settings.rates_never': '未取得',
+		'settings.rates_refresh': 'レートを更新',
+		'settings.rates_count': 'キャッシュ済み {count} 件',
 
 		'scan.heading': '明細をスキャン',
 		'scan.description':

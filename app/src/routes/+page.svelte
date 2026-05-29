@@ -3,6 +3,7 @@
 	import { subscriptions } from '$lib/stores/subscriptions.svelte';
 	import { paymentMethods } from '$lib/stores/payment_methods.svelte';
 	import { categories } from '$lib/stores/categories.svelte';
+	import { exchangeRates } from '$lib/stores/exchange_rates.svelte';
 	import { i18n, t, tn } from '$lib/i18n.svelte';
 	import { PAYMENT_METHOD_KINDS, type BillingCycle, type PaymentMethodKind } from '$lib/types';
 
@@ -59,8 +60,22 @@
 
 	let monthlyTotalJpy = $derived(
 		subscriptions.items
-			.filter((s) => s.status === 'active' && s.currency === 'JPY')
-			.reduce((sum, s) => sum + monthlyEquivalentMinor(s.amount_minor, s.billing_cycle), 0)
+			.filter((s) => s.status === 'active')
+			.reduce((sum, s) => {
+				const monthlyMinor = monthlyEquivalentMinor(s.amount_minor, s.billing_cycle);
+				if (s.currency === 'JPY') return sum + monthlyMinor;
+				const converted = exchangeRates.toJpyMinor(monthlyMinor, s.currency);
+				return converted !== null ? sum + converted : sum;
+			}, 0)
+	);
+
+	let unconvertibleCount = $derived(
+		subscriptions.items.filter(
+			(s) =>
+				s.status === 'active' &&
+				s.currency !== 'JPY' &&
+				exchangeRates.toJpyMinor(s.amount_minor, s.currency) === null
+		).length
 	);
 
 	let activeCount = $derived(subscriptions.items.filter((s) => s.status === 'active').length);
@@ -136,6 +151,7 @@
 		subscriptions.load();
 		paymentMethods.load();
 		categories.load();
+		exchangeRates.load();
 	});
 </script>
 

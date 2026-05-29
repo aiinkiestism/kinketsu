@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { llmConfig } from '$lib/stores/llm_config.svelte';
-	import { t } from '$lib/i18n.svelte';
+	import { exchangeRates } from '$lib/stores/exchange_rates.svelte';
+	import { i18n, t } from '$lib/i18n.svelte';
 	import {
 		LLM_PROVIDERS,
 		LLM_PROVIDER_LABEL,
@@ -10,6 +11,17 @@
 		type LlmConfig,
 		type LlmProviderKind
 	} from '$lib/types';
+
+	function formatTimestamp(iso: string): string {
+		try {
+			return new Intl.DateTimeFormat(i18n.bcp47, {
+				dateStyle: 'medium',
+				timeStyle: 'short'
+			}).format(new Date(iso));
+		} catch {
+			return iso;
+		}
+	}
 
 	let provider = $state<LlmProviderKind>('claude');
 	let apiKey = $state('');
@@ -46,7 +58,7 @@
 	}
 
 	onMount(async () => {
-		await llmConfig.load();
+		await Promise.all([llmConfig.load(), exchangeRates.load()]);
 		const cfg = llmConfig.current;
 		if (cfg) {
 			provider = cfg.provider;
@@ -129,6 +141,42 @@
 			{/if}
 		</form>
 	</section>
+
+	<section class="glass section">
+		<h2>{t('settings.rates_heading')}</h2>
+		<p class="muted desc">{t('settings.rates_description')}</p>
+
+		<div class="rates-status">
+			<div>
+				<span class="muted small">{t('settings.rates_last')}</span>
+				<span class="rates-time">
+					{exchangeRates.lastFetched
+						? formatTimestamp(exchangeRates.lastFetched)
+						: t('settings.rates_never')}
+				</span>
+			</div>
+			{#if exchangeRates.items.length > 0}
+				<span class="muted small"
+					>{t('settings.rates_count', { count: exchangeRates.items.length })}</span
+				>
+			{/if}
+		</div>
+
+		<div class="actions">
+			<button
+				type="button"
+				class="save"
+				onclick={() => exchangeRates.refresh()}
+				disabled={exchangeRates.refreshing}
+			>
+				{exchangeRates.refreshing ? t('common.loading') : t('settings.rates_refresh')}
+			</button>
+		</div>
+
+		{#if exchangeRates.error}
+			<p class="error">{t('common.error')}: {exchangeRates.error}</p>
+		{/if}
+	</section>
 </div>
 
 <style>
@@ -208,5 +256,28 @@
 		color: var(--color-accent-mochi);
 		margin: 0;
 		font-size: 0.9rem;
+	}
+	.section + .section {
+		margin-top: 1.25rem;
+	}
+	.rates-status {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 1rem;
+		padding: 0.85rem 1rem;
+		border-radius: var(--kk-radius-sm);
+		background: var(--kk-surface-2);
+		border: 1px solid var(--kk-stroke);
+		margin-bottom: 1rem;
+	}
+	.rates-time {
+		display: block;
+		font-size: 0.95rem;
+		font-variant-numeric: tabular-nums;
+		margin-top: 0.15rem;
+	}
+	.small {
+		font-size: 0.8rem;
 	}
 </style>

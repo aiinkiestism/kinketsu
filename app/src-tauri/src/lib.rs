@@ -83,6 +83,18 @@ async fn create_payment_method(
 }
 
 #[tauri::command]
+async fn update_payment_method(
+    state: State<'_, AppState>,
+    pm: PaymentMethod,
+) -> Result<(), String> {
+    let mut updated = pm;
+    updated.updated_at = chrono::Utc::now();
+    db::payment_methods::update(&state.pool, &updated)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn delete_payment_method(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
     db::payment_methods::delete(&state.pool, id)
         .await
@@ -108,6 +120,15 @@ async fn create_category(
         .await
         .map_err(|e| e.to_string())?;
     Ok(cat)
+}
+
+#[tauri::command]
+async fn update_category(state: State<'_, AppState>, cat: Category) -> Result<(), String> {
+    let mut updated = cat;
+    updated.updated_at = chrono::Utc::now();
+    db::categories::update(&state.pool, &updated)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -543,6 +564,34 @@ async fn confirm_detection_event(
 }
 
 #[tauri::command]
+async fn confirm_detection_event_with_overrides(
+    state: State<'_, AppState>,
+    id: Uuid,
+    sub: NewSubscription,
+) -> Result<Subscription, String> {
+    let _ev = db::detection_events::get(&state.pool, id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "detection event not found".to_string())?;
+
+    let new_sub = sub.into_subscription();
+    db::subscriptions::insert(&state.pool, &new_sub)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    db::detection_events::update_status(
+        &state.pool,
+        id,
+        DetectionStatus::Confirmed,
+        Some(new_sub.id),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(new_sub)
+}
+
+#[tauri::command]
 async fn reject_detection_event(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
     db::detection_events::update_status(&state.pool, id, DetectionStatus::Rejected, None)
         .await
@@ -613,15 +662,18 @@ pub fn run() {
             delete_subscription,
             list_payment_methods,
             create_payment_method,
+            update_payment_method,
             delete_payment_method,
             list_categories,
             create_category,
+            update_category,
             delete_category,
             get_llm_config,
             set_llm_config,
             extract_subscription_from_text,
             list_detection_events,
             confirm_detection_event,
+            confirm_detection_event_with_overrides,
             reject_detection_event,
             refresh_exchange_rates,
             list_exchange_rates,

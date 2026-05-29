@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { DetectionEvent, Subscription } from '$lib/types';
+import type { DetectionEvent, NewSubscription, Subscription } from '$lib/types';
 
 class DetectionEventsStore {
 	items = $state<DetectionEvent[]>([]);
@@ -24,6 +24,20 @@ class DetectionEventsStore {
 			const sub = await invoke<Subscription>('confirm_detection_event', { id });
 			await this.load();
 			return sub;
+		} catch (e) {
+			this.error = String(e);
+			return null;
+		}
+	}
+
+	async confirmWithOverrides(id: string, sub: NewSubscription): Promise<Subscription | null> {
+		try {
+			const created = await invoke<Subscription>('confirm_detection_event_with_overrides', {
+				id,
+				sub
+			});
+			await this.load();
+			return created;
 		} catch (e) {
 			this.error = String(e);
 			return null;

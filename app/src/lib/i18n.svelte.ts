@@ -154,6 +154,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'inbox.empty':
 			'Nothing to review yet. Connect a source above or paste a receipt on the Scan page.',
 		'inbox.confirm': 'Confirm',
+		'inbox.edit_confirm': 'Edit & confirm',
 		'inbox.reject': 'Reject',
 		'inbox.scan_run': 'Run Gmail scan',
 		'inbox.scan_running': 'Scanning…',
@@ -330,6 +331,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'inbox.empty':
 			'まだ何もありません。上のソースを接続するか、Scan ページから明細を貼り付けてください。',
 		'inbox.confirm': '確定',
+		'inbox.edit_confirm': '編集して確定',
 		'inbox.reject': '却下',
 		'inbox.scan_run': 'Gmail スキャン実行',
 		'inbox.scan_running': 'スキャン中…',

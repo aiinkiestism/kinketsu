@@ -5,7 +5,68 @@
 	import { paypal } from '$lib/stores/paypal.svelte';
 	import { i18n, t, tn } from '$lib/i18n.svelte';
 	import MonthRangeSelect from '$lib/components/MonthRangeSelect.svelte';
-	import type { DetectionSource, YearMonth } from '$lib/types';
+	import {
+		CURRENCIES,
+		type BillingCycle,
+		type DetectionEvent,
+		type DetectionSource,
+		type YearMonth
+	} from '$lib/types';
+
+	let editingEvent = $state<DetectionEvent | null>(null);
+	let editName = $state('');
+	let editAmount = $state<number>(0);
+	let editCurrency = $state('JPY');
+	let editCycle = $state<BillingCycle>('monthly');
+	let editNextBilling = $state('');
+
+	function toMinor(amount: number, currency: string): number {
+		return currency === 'JPY' ? Math.round(amount) : Math.round(amount * 100);
+	}
+
+	function fromMinor(amount_minor: number, currency: string): number {
+		return currency === 'JPY' ? amount_minor : amount_minor / 100;
+	}
+
+	function startEditEvent(ev: DetectionEvent) {
+		editingEvent = ev;
+		editName = ev.parsed_payload.service_name ?? '';
+		editCurrency = ev.parsed_payload.currency ?? 'JPY';
+		editAmount = ev.parsed_payload.amount_minor !== null
+			? fromMinor(ev.parsed_payload.amount_minor, editCurrency)
+			: 0;
+		editCycle = ev.parsed_payload.billing_cycle ?? 'monthly';
+		editNextBilling = '';
+	}
+
+	function cancelEditEvent() {
+		editingEvent = null;
+	}
+
+	async function saveEditEvent(ev: DetectionEvent) {
+		if (!editName.trim()) return;
+		try {
+			await detectionEvents.confirmWithOverrides(ev.id, {
+				name: editName.trim(),
+				service_icon: null,
+				plan: null,
+				amount_minor: toMinor(editAmount, editCurrency),
+				currency: editCurrency,
+				billing_cycle: editCycle,
+				next_billing_date: editNextBilling || null,
+				started_at: ev.parsed_payload.charged_at,
+				payment_method_id: null,
+				category_id: null,
+				status: null,
+				notes: ev.parsed_payload.payment_method_hint
+					? `Payment hint: ${ev.parsed_payload.payment_method_hint}`
+					: null
+			});
+			editingEvent = null;
+		} catch {
+			/* error in store */
+		}
+	}
 
 	let scanRange = $state<YearMonth[]>([]);
 	let scanFeedback = $state<string | null>(null);
@@ -59,10 +120,6 @@
 		} catch {
 			return iso;
 		}
-	}
-
-	function fromMinor(amount_minor: number, currency: string): number {
-		return currency === 'JPY' ? amount_minor : amount_minor / 100;
 	}
 
 	function formatMoney(amount_minor: number | null, currency: string | null): string {
@@ -206,18 +263,74 @@
 									<span>{t(`cycle.${ev.parsed_payload.billing_cycle}`)}</span>
 								{/if}
 							</p>
+							{#if ev.raw_summary}
+								<p class="event-detail muted small">{ev.raw_summary}</p>
+							{/if}
 							{#if ev.parsed_payload.payment_method_hint}
 								<p class="event-detail muted small">{ev.parsed_payload.payment_method_hint}</p>
 							{/if}
 							<p class="event-detail muted small">{formatTimestamp(ev.created_at)}</p>
+
+							{#if editingEvent?.id === ev.id}
+								<div class="edit-grid">
+									<label>
+										<span>{t('form.name')}</span>
+										<input bind:value={editName} required />
+									</label>
+									<label>
+										<span>{t('form.amount')}</span>
+										<input
+											type="number"
+											bind:value={editAmount}
+											min="0"
+											step={editCurrency === 'JPY' ? '1' : '0.01'}
+										/>
+									</label>
+									<label>
+										<span>{t('form.currency')}</span>
+										<select bind:value={editCurrency}>
+											{#each CURRENCIES as c (c)}
+												<option value={c}>{c}</option>
+											{/each}
+										</select>
+									</label>
+									<label>
+										<span>{t('form.billing_cycle')}</span>
+										<select bind:value={editCycle}>
+											<option value="weekly">{t('cycle.weekly')}</option>
+											<option value="monthly">{t('cycle.monthly')}</option>
+											<option value="quarterly">{t('cycle.quarterly')}</option>
+											<option value="semi_annual">{t('cycle.semi_annual')}</option>
+											<option value="annual">{t('cycle.annual')}</option>
+											<option value="custom">{t('cycle.custom')}</option>
+										</select>
+									</label>
+									<label>
+										<span>{t('form.next_billing_date')}</span>
+										<input type="date" bind:value={editNextBilling} />
+									</label>
+								</div>
+							{/if}
 						</div>
 						<div class="event-actions">
-							<button class="confirm" onclick={() => detectionEvents.confirm(ev.id)}>
-								{t('inbox.confirm')}
-							</button>
-							<button class="reject" onclick={() => detectionEvents.reject(ev.id)}>
-								{t('inbox.reject')}
-							</button>
+							{#if editingEvent?.id === ev.id}
+								<button class="confirm" onclick={() => saveEditEvent(ev)}>
+									{t('inbox.confirm')}
+								</button>
+								<button class="reject" onclick={cancelEditEvent}>
+									{t('subs.cancel')}
+								</button>
+							{:else}
+								<button class="confirm" onclick={() => detectionEvents.confirm(ev.id)}>
+									{t('inbox.confirm')}
+								</button>
+								<button class="reject" onclick={() => startEditEvent(ev)}>
+									{t('inbox.edit_confirm')}
+								</button>
+								<button class="reject" onclick={() => detectionEvents.reject(ev.id)}>
+									{t('inbox.reject')}
+								</button>
+							{/if}
 						</div>
 					</li>
 				{/each}
@@ -410,7 +523,32 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.4rem;
-		align-self: center;
+		align-self: flex-start;
+	}
+	.edit-grid {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 0.6rem;
+		margin-top: 0.85rem;
+		padding-top: 0.85rem;
+		border-top: 1px solid var(--kk-stroke);
+	}
+	.edit-grid label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		font-size: 0.8rem;
+		color: var(--kk-text-muted);
+	}
+	.edit-grid input,
+	.edit-grid select {
+		padding: 0.4rem 0.55rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		background: var(--kk-surface-2);
+		color: var(--kk-text-primary);
+		font-size: 0.85rem;
+		font-family: inherit;
 	}
 	.event-actions button {
 		padding: 0.5rem 0.85rem;

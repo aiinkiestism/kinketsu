@@ -29,6 +29,16 @@ class CategoriesStore {
 		}
 	}
 
+	async update(cat: Category) {
+		try {
+			await invoke('update_category', { cat });
+			await this.load();
+		} catch (e) {
+			this.error = String(e);
+			throw e;
+		}
+	}
+
 	async remove(id: string) {
 		try {
 			await invoke('delete_category', { id });

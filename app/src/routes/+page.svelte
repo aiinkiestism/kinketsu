@@ -11,6 +11,8 @@
 		PAYMENT_METHOD_KINDS,
 		SUBSCRIPTION_STATUSES,
 		type BillingCycle,
+		type Category,
+		type PaymentMethod,
 		type PaymentMethodKind,
 		type Subscription,
 		type SubscriptionStatus
@@ -205,6 +207,59 @@
 	let pmName = $state('');
 	let pmKind = $state<PaymentMethodKind>('credit_card');
 	let catName = $state('');
+
+	let editingPmId = $state<string | null>(null);
+	let editPmName = $state('');
+	let editPmKind = $state<PaymentMethodKind>('credit_card');
+
+	function startEditPm(pm: PaymentMethod) {
+		editingPmId = pm.id;
+		editPmName = pm.name;
+		editPmKind = pm.kind;
+	}
+
+	function cancelEditPm() {
+		editingPmId = null;
+	}
+
+	async function saveEditPm(pm: PaymentMethod) {
+		if (!editPmName.trim()) return;
+		try {
+			await paymentMethods.update({
+				...pm,
+				name: editPmName.trim(),
+				kind: editPmKind
+			});
+			editingPmId = null;
+		} catch {
+			/* error in store */
+		}
+	}
+
+	let editingCatId = $state<string | null>(null);
+	let editCatName = $state('');
+
+	function startEditCat(cat: Category) {
+		editingCatId = cat.id;
+		editCatName = cat.name;
+	}
+
+	function cancelEditCat() {
+		editingCatId = null;
+	}
+
+	async function saveEditCat(cat: Category) {
+		if (!editCatName.trim()) return;
+		try {
+			await categories.update({
+				...cat,
+				name: editCatName.trim()
+			});
+			editingCatId = null;
+		} catch {
+			/* error in store */
+		}
+	}
 
 	async function handleAddPaymentMethod(e: SubmitEvent) {
 		e.preventDefault();
@@ -442,15 +497,33 @@
 					{:else}
 						<ul class="manage-list">
 							{#each paymentMethods.items as pm (pm.id)}
-								<li>
-									<span class="m-name">{pm.name}</span>
-									<span class="muted small">{t(`kind.${pm.kind}`)}</span>
-									<button
-										class="del-small"
-										onclick={() => paymentMethods.remove(pm.id)}
-										aria-label={t('common.delete')}
-									>×</button>
-								</li>
+								{#if editingPmId === pm.id}
+									<li class="manage-edit">
+										<input bind:value={editPmName} placeholder={t('form.name')} />
+										<select bind:value={editPmKind}>
+											{#each PAYMENT_METHOD_KINDS as k (k)}
+												<option value={k}>{t(`kind.${k}`)}</option>
+											{/each}
+										</select>
+										<button class="ok-small" onclick={() => saveEditPm(pm)} aria-label={t('common.edit')}>✓</button>
+										<button class="del-small" onclick={cancelEditPm} aria-label={t('subs.cancel')}>×</button>
+									</li>
+								{:else}
+									<li>
+										<span class="m-name">{pm.name}</span>
+										<span class="muted small">{t(`kind.${pm.kind}`)}</span>
+										<button
+											class="edit-small"
+											onclick={() => startEditPm(pm)}
+											aria-label={t('common.edit')}
+										>✎</button>
+										<button
+											class="del-small"
+											onclick={() => paymentMethods.remove(pm.id)}
+											aria-label={t('common.delete')}
+										>×</button>
+									</li>
+								{/if}
 							{/each}
 						</ul>
 					{/if}
@@ -472,14 +545,27 @@
 					{:else}
 						<ul class="manage-list">
 							{#each categories.items as cat (cat.id)}
+								{#if editingCatId === cat.id}
+									<li class="manage-edit cat-edit">
+										<input bind:value={editCatName} placeholder={t('form.name')} />
+										<button class="ok-small" onclick={() => saveEditCat(cat)} aria-label={t('common.edit')}>✓</button>
+										<button class="del-small" onclick={cancelEditCat} aria-label={t('subs.cancel')}>×</button>
+									</li>
+								{:else}
 								<li>
 									<span class="m-name">{cat.name}</span>
+									<button
+										class="edit-small"
+										onclick={() => startEditCat(cat)}
+										aria-label={t('common.edit')}
+									>✎</button>
 									<button
 										class="del-small"
 										onclick={() => categories.remove(cat.id)}
 										aria-label={t('common.delete')}
 									>×</button>
 								</li>
+								{/if}
 							{/each}
 						</ul>
 					{/if}
@@ -760,7 +846,9 @@
 	.small {
 		font-size: 0.8rem;
 	}
-	.del-small {
+	.del-small,
+	.edit-small,
+	.ok-small {
 		border: none;
 		background: transparent;
 		color: var(--kk-text-muted);
@@ -773,6 +861,31 @@
 	}
 	.del-small:hover {
 		color: var(--color-accent-mochi);
+	}
+	.edit-small:hover {
+		color: var(--color-accent-sora);
+	}
+	.ok-small {
+		color: var(--color-accent-matcha);
+	}
+	.manage-edit {
+		display: grid !important;
+		grid-template-columns: 1fr 1fr auto auto;
+		gap: 0.4rem;
+		align-items: center;
+	}
+	.manage-edit.cat-edit {
+		grid-template-columns: 1fr auto auto;
+	}
+	.manage-edit input,
+	.manage-edit select {
+		padding: 0.4rem 0.55rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		background: var(--kk-surface-2);
+		color: var(--kk-text-primary);
+		font-size: 0.85rem;
+		font-family: inherit;
 	}
 	.manage-add {
 		display: grid;

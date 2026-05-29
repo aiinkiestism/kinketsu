@@ -29,6 +29,16 @@ class PaymentMethodsStore {
 		}
 	}
 
+	async update(pm: PaymentMethod) {
+		try {
+			await invoke('update_payment_method', { pm });
+			await this.load();
+		} catch (e) {
+			this.error = String(e);
+			throw e;
+		}
+	}
+
 	async remove(id: string) {
 		try {
 			await invoke('delete_payment_method', { id });

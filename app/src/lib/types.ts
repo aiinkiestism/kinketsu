@@ -147,3 +147,14 @@ export const LLM_DEFAULTS: Record<LlmProviderKind, LlmProviderDefaults> = {
 export function isCloudProvider(p: LlmProviderKind): boolean {
 	return p === 'claude' || p === 'openai' || p === 'gemini';
 }
+
+// ---- Extraction pipeline ----
+
+export interface ParsedSubscriptionHint {
+	service_name: string | null;
+	amount_minor: number | null;
+	currency: string | null;
+	billing_cycle: BillingCycle | null;
+	payment_method_hint: string | null;
+	charged_at: string | null;
+}

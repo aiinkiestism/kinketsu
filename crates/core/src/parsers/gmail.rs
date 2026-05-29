@@ -1,10 +1,12 @@
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use super::ParsedSubscriptionHint;
 use crate::llm::LlmClient;
-use crate::models::BillingCycle;
 use crate::{Error, Result};
 
+/// A reference to a Gmail message we want to parse. The full body is fetched on
+/// demand and never persisted — only `message_id` is stored to deduplicate.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GmailMessageRef {
     pub message_id: String,
@@ -13,20 +15,10 @@ pub struct GmailMessageRef {
     pub received_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParsedSubscriptionHint {
-    pub service_name: Option<String>,
-    pub amount_minor: Option<i64>,
-    pub currency: Option<String>,
-    pub billing_cycle: Option<BillingCycle>,
-    pub payment_method_hint: Option<String>,
-    pub charged_at: Option<NaiveDate>,
-}
-
-/// Parse a single Gmail message via the configured LLM provider.
+/// Fetch a single Gmail message and run extraction.
 ///
-/// TODO: fetch the message body through the Gmail API, run [`LlmClient::extract`]
-/// with the receipt-extraction schema, return a [`ParsedSubscriptionHint`].
+/// TODO: implement Gmail API fetch + body decoding, then delegate to
+/// [`super::extract_from_text`].
 pub async fn parse_message(
     _provider: &LlmClient,
     _msg: &GmailMessageRef,

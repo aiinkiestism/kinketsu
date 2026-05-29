@@ -14,6 +14,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		tagline: 'Every subscription, from your inbox.',
 
 		'nav.dashboard': 'Dashboard',
+		'nav.scan': 'Scan',
 		'nav.settings': 'Settings',
 
 		'dashboard.monthly_total': 'Monthly equivalent total (JPY)',
@@ -72,6 +73,18 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.save': 'Save',
 		'settings.saved': 'Saved.',
 
+		'scan.heading': 'Scan a receipt',
+		'scan.description':
+			'Paste a subscription confirmation or renewal email below. The LLM you picked in Settings extracts the structured fields. Use this to validate your provider before connecting Gmail.',
+		'scan.placeholder': 'Paste the body of a subscription email here…',
+		'scan.extract': 'Extract',
+		'scan.result_heading': 'Extracted',
+		'scan.charged_at': 'Charged at',
+		'scan.save_as_sub': 'Save as subscription',
+		'scan.no_provider': 'You haven’t configured an LLM provider yet.',
+		'scan.go_settings': 'Open Settings',
+		'scan.missing_fields': 'The extracted hint is missing required fields (name, amount, currency, cycle).',
+
 		'common.delete': 'Delete',
 		'common.error': 'Error',
 		'common.loading': 'Loading…'
@@ -80,6 +93,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		tagline: 'サブスクの全貌、メールから。',
 
 		'nav.dashboard': 'ダッシュボード',
+		'nav.scan': 'スキャン',
 		'nav.settings': '設定',
 
 		'dashboard.monthly_total': '月額換算合計 (JPY)',
@@ -137,6 +151,18 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.model': 'モデル',
 		'settings.save': '保存',
 		'settings.saved': '保存しました。',
+
+		'scan.heading': '明細をスキャン',
+		'scan.description':
+			'サブスクの確認メールや更新メールをここに貼り付けてください。設定で選んだ LLM が構造化フィールドを抽出します。Gmail 連携の前にプロバイダーの動作確認に使えます。',
+		'scan.placeholder': 'サブスクの明細メール本文をここに貼り付け…',
+		'scan.extract': '抽出',
+		'scan.result_heading': '抽出結果',
+		'scan.charged_at': '請求日',
+		'scan.save_as_sub': 'サブスクとして保存',
+		'scan.no_provider': 'LLM プロバイダーが未設定です。',
+		'scan.go_settings': '設定を開く',
+		'scan.missing_fields': '必須フィールド(名前・金額・通貨・サイクル)が不足しています。',
 
 		'common.delete': '削除',
 		'common.error': 'エラー',

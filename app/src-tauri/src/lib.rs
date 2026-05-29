@@ -4,10 +4,11 @@
 //! SvelteKit frontend calls via `@tauri-apps/api/core::invoke`.
 
 use kinketsu_core::db;
-use kinketsu_core::llm::LlmConfig;
+use kinketsu_core::llm::{LlmClient, LlmConfig};
 use kinketsu_core::models::{
     Category, NewCategory, NewPaymentMethod, NewSubscription, PaymentMethod, Subscription,
 };
+use kinketsu_core::parsers::{ParsedSubscriptionHint, extract_from_text};
 use sqlx::SqlitePool;
 use tauri::{Manager, State};
 use uuid::Uuid;
@@ -116,6 +117,24 @@ async fn set_llm_config(state: State<'_, AppState>, config: LlmConfig) -> Result
         .map_err(|e| e.to_string())
 }
 
+// ---- Extraction pipeline ----
+
+#[tauri::command]
+async fn extract_subscription_from_text(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<ParsedSubscriptionHint, String> {
+    let cfg = db::settings::get::<LlmConfig>(&state.pool, db::settings::keys::LLM_CONFIG)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no LLM provider configured".to_string())?;
+
+    let client = LlmClient::from_config(cfg);
+    extract_from_text(&client, text)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -153,6 +172,7 @@ pub fn run() {
             delete_category,
             get_llm_config,
             set_llm_config,
+            extract_subscription_from_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

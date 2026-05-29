@@ -47,4 +47,6 @@ pub mod keys {
     pub const LLM_CONFIG: &str = "llm.config";
     pub const GMAIL_OAUTH_CREDS: &str = "gmail.oauth_credentials";
     pub const GMAIL_TOKENS: &str = "gmail.tokens";
+    pub const PAYPAL_OAUTH_CREDS: &str = "paypal.oauth_credentials";
+    pub const PAYPAL_TOKENS: &str = "paypal.tokens";
 }

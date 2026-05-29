@@ -3,6 +3,7 @@
 	import { llmConfig } from '$lib/stores/llm_config.svelte';
 	import { exchangeRates } from '$lib/stores/exchange_rates.svelte';
 	import { gmail } from '$lib/stores/gmail.svelte';
+	import { paypal } from '$lib/stores/paypal.svelte';
 	import { i18n, t } from '$lib/i18n.svelte';
 	import {
 		LLM_PROVIDERS,
@@ -33,6 +34,29 @@
 	let gmailClientId = $state('');
 	let gmailClientSecret = $state('');
 	let gmailSavedFlash = $state(false);
+
+	let paypalClientId = $state('');
+	let paypalClientSecret = $state('');
+	let paypalSavedFlash = $state(false);
+
+	async function handleSavePaypalCreds(e: SubmitEvent) {
+		e.preventDefault();
+		if (!paypalClientId.trim() || !paypalClientSecret.trim()) return;
+		try {
+			await paypal.saveCredentials({
+				client_id: paypalClientId.trim(),
+				client_secret: paypalClientSecret.trim()
+			});
+			paypalSavedFlash = true;
+			setTimeout(() => (paypalSavedFlash = false), 2000);
+		} catch {
+			/* error in store */
+		}
+	}
+
+	async function handleDisconnectPaypal() {
+		await paypal.disconnect();
+	}
 
 	async function handleSaveGmailCreds(e: SubmitEvent) {
 		e.preventDefault();
@@ -82,7 +106,12 @@
 	}
 
 	onMount(async () => {
-		await Promise.all([llmConfig.load(), exchangeRates.load(), gmail.load()]);
+		await Promise.all([
+			llmConfig.load(),
+			exchangeRates.load(),
+			gmail.load(),
+			paypal.load()
+		]);
 		const cfg = llmConfig.current;
 		if (cfg) {
 			provider = cfg.provider;
@@ -100,6 +129,10 @@
 		if (gmail.credentials) {
 			gmailClientId = gmail.credentials.client_id;
 			gmailClientSecret = gmail.credentials.client_secret;
+		}
+		if (paypal.credentials) {
+			paypalClientId = paypal.credentials.client_id;
+			paypalClientSecret = paypal.credentials.client_secret;
 		}
 	});
 </script>
@@ -257,6 +290,56 @@
 
 		{#if gmail.error}
 			<p class="error">{t('common.error')}: {gmail.error}</p>
+		{/if}
+	</section>
+
+	<section class="glass section">
+		<h2>{t('settings.paypal_heading')}</h2>
+		<p class="muted desc">{t('settings.paypal_description')}</p>
+
+		<form class="form" onsubmit={handleSavePaypalCreds}>
+			<label>
+				<span>{t('settings.gmail_client_id')}</span>
+				<input type="text" bind:value={paypalClientId} autocomplete="off" spellcheck="false" />
+			</label>
+			<label>
+				<span>{t('settings.gmail_client_secret')}</span>
+				<input
+					type="password"
+					bind:value={paypalClientSecret}
+					autocomplete="off"
+					spellcheck="false"
+				/>
+			</label>
+
+			<div class="actions">
+				<button type="submit" class="save" disabled={paypal.saving}>
+					{paypal.saving ? t('common.loading') : t('settings.gmail_save_creds')}
+				</button>
+				{#if paypalSavedFlash}
+					<span class="saved">{t('settings.saved')}</span>
+				{/if}
+			</div>
+		</form>
+
+		<div class="rates-status" style="margin-top:1rem">
+			<div>
+				<span class="muted small">{t('settings.gmail_status')}</span>
+				<span class="rates-time">
+					{paypal.connected
+						? t('settings.paypal_connected')
+						: t('settings.paypal_not_connected')}
+				</span>
+			</div>
+			{#if paypal.connected}
+				<button type="button" class="link-like" onclick={handleDisconnectPaypal}>
+					{t('settings.gmail_disconnect')}
+				</button>
+			{/if}
+		</div>
+
+		{#if paypal.error}
+			<p class="error">{t('common.error')}: {paypal.error}</p>
 		{/if}
 	</section>
 </div>

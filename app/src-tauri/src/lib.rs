@@ -296,6 +296,104 @@ async fn run_gmail_scan(
     Ok(created)
 }
 
+// ---- PayPal OAuth ----
+
+#[tauri::command]
+async fn save_paypal_oauth_credentials(
+    state: State<'_, AppState>,
+    creds: OAuthCredentials,
+) -> Result<(), String> {
+    db::settings::set(&state.pool, db::settings::keys::PAYPAL_OAUTH_CREDS, &creds)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_paypal_oauth_credentials(
+    state: State<'_, AppState>,
+) -> Result<Option<OAuthCredentials>, String> {
+    db::settings::get::<OAuthCredentials>(&state.pool, db::settings::keys::PAYPAL_OAUTH_CREDS)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn has_paypal_tokens(state: State<'_, AppState>) -> Result<bool, String> {
+    let tokens: Option<Tokens> = db::settings::get(&state.pool, db::settings::keys::PAYPAL_TOKENS)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(tokens.is_some())
+}
+
+#[tauri::command]
+async fn disconnect_paypal(state: State<'_, AppState>) -> Result<(), String> {
+    db::settings::delete(&state.pool, db::settings::keys::PAYPAL_TOKENS)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn start_paypal_oauth(state: State<'_, AppState>) -> Result<(), String> {
+    let creds: OAuthCredentials =
+        db::settings::get(&state.pool, db::settings::keys::PAYPAL_OAUTH_CREDS)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "PayPal OAuth credentials not configured".to_string())?;
+
+    let (listener, port) = oauth::bind_oauth_listener()
+        .await
+        .map_err(|e| e.to_string())?;
+    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+    let auth_url = oauth::build_paypal_auth_url(
+        &creds.client_id,
+        &redirect_uri,
+        &[oauth::PAYPAL_OPENID_SCOPE, oauth::PAYPAL_TRANSACTIONS_SCOPE],
+    );
+
+    webbrowser::open(&auth_url).map_err(|e| format!("failed to open browser: {e}"))?;
+
+    let code = tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        oauth::wait_for_oauth_code(listener),
+    )
+    .await
+    .map_err(|_| "OAuth flow timed out after 5 minutes".to_string())?
+    .map_err(|e| e.to_string())?;
+
+    let tokens = oauth::exchange_paypal_code(&creds, &code, &redirect_uri)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    db::settings::set(&state.pool, db::settings::keys::PAYPAL_TOKENS, &tokens)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn run_paypal_scan(state: State<'_, AppState>) -> Result<usize, String> {
+    // Token refresh is exercised here so the connection is verified as live,
+    // even though the Transaction Search API integration isn't wired yet.
+    let creds: OAuthCredentials =
+        db::settings::get(&state.pool, db::settings::keys::PAYPAL_OAUTH_CREDS)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "PayPal OAuth credentials not configured".to_string())?;
+    let mut tokens: Tokens = db::settings::get(&state.pool, db::settings::keys::PAYPAL_TOKENS)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "PayPal not connected".to_string())?;
+    let _access = oauth::ensure_paypal_access_token(&creds, &mut tokens)
+        .await
+        .map_err(|e| e.to_string())?;
+    db::settings::set(&state.pool, db::settings::keys::PAYPAL_TOKENS, &tokens)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Err("PayPal transaction scan is not yet wired — the Transaction Search API requires a date-range loop and per-transaction LLM extraction, both of which are scoped to a follow-up round. Token refresh succeeded, so the connection is healthy.".to_string())
+}
+
 // ---- iCalendar export ----
 
 #[tauri::command]
@@ -475,6 +573,12 @@ pub fn run() {
             disconnect_gmail,
             start_gmail_oauth,
             run_gmail_scan,
+            save_paypal_oauth_credentials,
+            get_paypal_oauth_credentials,
+            has_paypal_tokens,
+            disconnect_paypal,
+            start_paypal_oauth,
+            run_paypal_scan,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

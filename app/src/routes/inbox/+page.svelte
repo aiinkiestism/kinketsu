@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { detectionEvents } from '$lib/stores/detection_events.svelte';
 	import { gmail } from '$lib/stores/gmail.svelte';
+	import { paypal } from '$lib/stores/paypal.svelte';
 	import { i18n, t, tn } from '$lib/i18n.svelte';
 	import MonthRangeSelect from '$lib/components/MonthRangeSelect.svelte';
 	import type { DetectionSource, YearMonth } from '$lib/types';
@@ -81,9 +82,18 @@
 		return t(`source.${s}`);
 	}
 
+	async function handleConnectPaypal() {
+		try {
+			await paypal.connect();
+		} catch {
+			/* error in store */
+		}
+	}
+
 	onMount(() => {
 		detectionEvents.load();
 		gmail.load();
+		paypal.load();
 	});
 </script>
 
@@ -125,9 +135,27 @@
 			<article class="source-card">
 				<div>
 					<h3>PayPal</h3>
-					<p class="muted small">{t('inbox.paypal_coming_soon')}</p>
+					{#if paypal.connected}
+						<p class="muted small connected">● {t('settings.paypal_connected')}</p>
+					{:else if !paypal.credentials}
+						<p class="muted small">{t('inbox.scan_needs_creds')}</p>
+					{:else}
+						<p class="muted small">{t('inbox.paypal_coming_soon')}</p>
+					{/if}
 				</div>
-				<button type="button" disabled>{t('inbox.connect_paypal')}</button>
+				{#if paypal.connected}
+					<button type="button" class="secondary" onclick={() => paypal.disconnect()}
+						>{t('inbox.gmail_disconnect')}</button
+					>
+				{:else}
+					<button
+						type="button"
+						onclick={handleConnectPaypal}
+						disabled={!paypal.credentials || paypal.connecting}
+					>
+						{paypal.connecting ? t('inbox.connect_gmail_loading') : t('inbox.connect_paypal')}
+					</button>
+				{/if}
 			</article>
 		</div>
 		{#if gmail.error}

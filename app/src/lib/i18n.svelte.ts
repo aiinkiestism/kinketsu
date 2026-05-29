@@ -86,6 +86,12 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.gmail_disconnect': 'Disconnect',
 		'settings.gmail_save_creds': 'Save credentials',
 
+		'settings.paypal_heading': 'PayPal integration',
+		'settings.paypal_description':
+			'kinketsu uses your PayPal Developer OAuth client (Log In with PayPal). Create one at developer.paypal.com/dashboard/applications and paste the client ID + secret. Scan is wired through token refresh only — the Transaction Search API integration is scoped for a follow-up.',
+		'settings.paypal_connected': 'Connected',
+		'settings.paypal_not_connected': 'Not connected',
+
 		'settings.rates_heading': 'Exchange rates',
 		'settings.rates_description':
 			'kinketsu caches exchange rates against JPY so the dashboard total reflects all active subscriptions, regardless of currency.',
@@ -233,6 +239,12 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.gmail_not_connected': '未接続',
 		'settings.gmail_disconnect': '切断',
 		'settings.gmail_save_creds': '認証情報を保存',
+
+		'settings.paypal_heading': 'PayPal 連携',
+		'settings.paypal_description':
+			'kinketsu はあなた自身の PayPal Developer OAuth クライアント (Log In with PayPal) を使います。developer.paypal.com/dashboard/applications で作成し、Client ID と Secret を貼り付けてください。スキャンはトークン更新のみ動作し、Transaction Search API の連携は次回ラウンドで対応予定です。',
+		'settings.paypal_connected': '接続済み',
+		'settings.paypal_not_connected': '未接続',
 
 		'settings.rates_heading': '為替レート',
 		'settings.rates_description':

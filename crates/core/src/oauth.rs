@@ -22,6 +22,12 @@ const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 pub const GMAIL_READONLY_SCOPE: &str = "https://www.googleapis.com/auth/gmail.readonly";
 
+const PAYPAL_AUTH_URL: &str = "https://www.paypal.com/signin/authorize";
+const PAYPAL_TOKEN_URL: &str = "https://api-m.paypal.com/v1/oauth2/token";
+pub const PAYPAL_OPENID_SCOPE: &str = "openid";
+pub const PAYPAL_TRANSACTIONS_SCOPE: &str =
+    "https://uri.paypal.com/services/reporting/search/read";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OAuthCredentials {
     pub client_id: String,
@@ -188,6 +194,114 @@ pub async fn refresh_access_token(
         .unwrap_or(3600);
     Ok((access_token, Utc::now() + Duration::seconds(expires_in)))
 }
+
+// ---- PayPal (Log In with PayPal) ----
+
+#[must_use]
+pub fn build_paypal_auth_url(client_id: &str, redirect_uri: &str, scopes: &[&str]) -> String {
+    let scope = scopes.join(" ");
+    format!(
+        "{PAYPAL_AUTH_URL}?response_type=code&client_id={cid}&redirect_uri={ru}&scope={sc}",
+        cid = percent_encode(client_id),
+        ru = percent_encode(redirect_uri),
+        sc = percent_encode(&scope),
+    )
+}
+
+pub async fn exchange_paypal_code(
+    creds: &OAuthCredentials,
+    code: &str,
+    redirect_uri: &str,
+) -> Result<Tokens> {
+    let resp = reqwest::Client::new()
+        .post(PAYPAL_TOKEN_URL)
+        .basic_auth(&creds.client_id, Some(&creds.client_secret))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+        ])
+        .send()
+        .await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(Error::Config(format!(
+            "paypal token exchange {status}: {text}"
+        )));
+    }
+    let body: serde_json::Value = resp.json().await?;
+    let refresh_token = body
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .ok_or_else(|| Error::Config("paypal token response missing refresh_token".into()))?;
+    let access_token = body
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let expires_at = body
+        .get("expires_in")
+        .and_then(|v| v.as_i64())
+        .map(|s| Utc::now() + Duration::seconds(s));
+    Ok(Tokens {
+        refresh_token,
+        access_token,
+        expires_at,
+    })
+}
+
+pub async fn refresh_paypal_access_token(
+    creds: &OAuthCredentials,
+    refresh_token: &str,
+) -> Result<(String, DateTime<Utc>)> {
+    let resp = reqwest::Client::new()
+        .post(PAYPAL_TOKEN_URL)
+        .basic_auth(&creds.client_id, Some(&creds.client_secret))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+        ])
+        .send()
+        .await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(Error::Config(format!(
+            "paypal token refresh {status}: {text}"
+        )));
+    }
+    let body: serde_json::Value = resp.json().await?;
+    let access_token = body
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::Config("paypal refresh response missing access_token".into()))?
+        .to_string();
+    let expires_in = body
+        .get("expires_in")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(3600);
+    Ok((access_token, Utc::now() + Duration::seconds(expires_in)))
+}
+
+pub async fn ensure_paypal_access_token(
+    creds: &OAuthCredentials,
+    tokens: &mut Tokens,
+) -> Result<String> {
+    let now = Utc::now();
+    if let (Some(tok), Some(exp)) = (tokens.access_token.as_ref(), tokens.expires_at) {
+        if exp > now + Duration::seconds(60) {
+            return Ok(tok.clone());
+        }
+    }
+    let (new_token, new_expires) =
+        refresh_paypal_access_token(creds, &tokens.refresh_token).await?;
+    tokens.access_token = Some(new_token.clone());
+    tokens.expires_at = Some(new_expires);
+    Ok(new_token)
+}
+
+// ---- Google (Gmail) ----
 
 /// Return a fresh access token, refreshing in-place if the cached one is
 /// expired (or within 60 seconds of expiry).

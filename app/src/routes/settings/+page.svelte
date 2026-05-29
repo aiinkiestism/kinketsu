@@ -5,7 +5,7 @@
 	import { exchangeRates } from '$lib/stores/exchange_rates.svelte';
 	import { gmail } from '$lib/stores/gmail.svelte';
 	import { paypal } from '$lib/stores/paypal.svelte';
-	import { i18n, t, tn } from '$lib/i18n.svelte';
+	import { i18n, t, tn, type LocaleCode } from '$lib/i18n.svelte';
 	import {
 		LLM_PROVIDERS,
 		LLM_PROVIDER_LABEL,
@@ -62,6 +62,15 @@
 	let checkingRenewals = $state(false);
 	let renewalResult = $state<number | null>(null);
 	let renewalError = $state<string | null>(null);
+
+	let showApiKey = $state(false);
+	let showGmailSecret = $state(false);
+	let showPaypalSecret = $state(false);
+
+	function handleLocaleChange(e: Event) {
+		const next = (e.target as HTMLSelectElement).value as LocaleCode;
+		i18n.setLocale(next);
+	}
 
 	async function handleCheckRenewals() {
 		checkingRenewals = true;
@@ -175,15 +184,20 @@
 			</label>
 
 			{#if isCloudProvider(provider)}
-				<label>
+				<label class="secret-field">
 					<span>{t('settings.api_key')}</span>
-					<input
-						type="password"
-						bind:value={apiKey}
-						placeholder={LLM_DEFAULTS[provider].key_hint ?? ''}
-						autocomplete="off"
-						spellcheck="false"
-					/>
+					<div class="secret-row">
+						<input
+							type={showApiKey ? 'text' : 'password'}
+							bind:value={apiKey}
+							placeholder={LLM_DEFAULTS[provider].key_hint ?? ''}
+							autocomplete="off"
+							spellcheck="false"
+						/>
+						<button type="button" class="reveal" onclick={() => (showApiKey = !showApiKey)}
+							>{showApiKey ? t('common.hide') : t('common.show')}</button
+						>
+					</div>
 				</label>
 			{:else}
 				<label>
@@ -272,14 +286,19 @@
 					placeholder="123…apps.googleusercontent.com"
 				/>
 			</label>
-			<label>
+			<label class="secret-field">
 				<span>{t('settings.gmail_client_secret')}</span>
-				<input
-					type="password"
-					bind:value={gmailClientSecret}
-					autocomplete="off"
-					spellcheck="false"
-				/>
+				<div class="secret-row">
+					<input
+						type={showGmailSecret ? 'text' : 'password'}
+						bind:value={gmailClientSecret}
+						autocomplete="off"
+						spellcheck="false"
+					/>
+					<button type="button" class="reveal" onclick={() => (showGmailSecret = !showGmailSecret)}
+						>{showGmailSecret ? t('common.hide') : t('common.show')}</button
+					>
+				</div>
 			</label>
 
 			<div class="actions">
@@ -320,14 +339,22 @@
 				<span>{t('settings.gmail_client_id')}</span>
 				<input type="text" bind:value={paypalClientId} autocomplete="off" spellcheck="false" />
 			</label>
-			<label>
+			<label class="secret-field">
 				<span>{t('settings.gmail_client_secret')}</span>
-				<input
-					type="password"
-					bind:value={paypalClientSecret}
-					autocomplete="off"
-					spellcheck="false"
-				/>
+				<div class="secret-row">
+					<input
+						type={showPaypalSecret ? 'text' : 'password'}
+						bind:value={paypalClientSecret}
+						autocomplete="off"
+						spellcheck="false"
+					/>
+					<button
+						type="button"
+						class="reveal"
+						onclick={() => (showPaypalSecret = !showPaypalSecret)}
+						>{showPaypalSecret ? t('common.hide') : t('common.show')}</button
+					>
+				</div>
 			</label>
 
 			<div class="actions">
@@ -383,6 +410,19 @@
 		{#if renewalError}
 			<p class="error">{t('common.error')}: {renewalError}</p>
 		{/if}
+	</section>
+
+	<section class="glass section">
+		<h2>{t('settings.language_heading')}</h2>
+		<p class="muted desc">{t('settings.language_description')}</p>
+
+		<label>
+			<span>{t('settings.language_heading')}</span>
+			<select value={i18n.locale} onchange={handleLocaleChange}>
+				<option value="en">{t('settings.language_en')}</option>
+				<option value="ja">{t('settings.language_ja')}</option>
+			</select>
+		</label>
 	</section>
 </div>
 
@@ -496,5 +536,23 @@
 		font-family: inherit;
 		font-size: 0.85rem;
 		padding: 0;
+	}
+	.secret-row {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		gap: 0.4rem;
+	}
+	.reveal {
+		padding: 0 0.85rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		background: var(--kk-surface-2);
+		color: var(--kk-text-muted);
+		cursor: pointer;
+		font-family: inherit;
+		font-size: 0.8rem;
+	}
+	.reveal:hover {
+		color: var(--kk-text-primary);
 	}
 </style>

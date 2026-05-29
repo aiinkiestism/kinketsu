@@ -62,9 +62,37 @@
 	function clearAll() {
 		value = [];
 	}
+
+	function selectLast12Months() {
+		const out: YearMonth[] = [];
+		let y = currentYear;
+		let m = currentMonth;
+		for (let i = 0; i < 12; i++) {
+			out.push({ year: y, month: m });
+			m -= 1;
+			if (m === 0) {
+				m = 12;
+				y -= 1;
+			}
+		}
+		value = out.sort((a, b) => (a.year - b.year) * 100 + (a.month - b.month));
+	}
+
+	function selectYear(year: number) {
+		const out: YearMonth[] = [];
+		for (let m = 1; m <= 12; m++) {
+			if (!isFuture(year, m)) out.push({ year, month: m });
+		}
+		value = out;
+	}
 </script>
 
 <div class="month-range">
+	<div class="presets">
+		<button type="button" onclick={selectLast12Months}>{t('range.last_12_months')}</button>
+		<button type="button" onclick={() => selectYear(currentYear)}>{t('range.this_year')}</button>
+		<button type="button" onclick={() => selectYear(currentYear - 1)}>{t('range.last_year')}</button>
+	</div>
 	{#each yearList as year (year)}
 		<div class="year-row">
 			<div class="year-head">
@@ -103,6 +131,25 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.85rem;
+	}
+	.presets {
+		display: flex;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+		margin-bottom: 0.25rem;
+	}
+	.presets button {
+		padding: 0.35rem 0.8rem;
+		border-radius: 999px;
+		border: 1px solid var(--kk-stroke);
+		background: var(--kk-surface-2);
+		color: var(--kk-text-muted);
+		font-size: 0.8rem;
+		cursor: pointer;
+		font-family: inherit;
+	}
+	.presets button:hover {
+		color: var(--kk-text-primary);
 	}
 	.year-row {
 		display: flex;

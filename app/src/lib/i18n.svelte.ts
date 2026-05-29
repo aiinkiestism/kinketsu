@@ -116,6 +116,20 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.notifications_result_one': 'Sent 1 notification.',
 		'settings.notifications_result_other': 'Sent {count} notifications.',
 
+		'settings.language_heading': 'Language',
+		'settings.language_description':
+			'kinketsu auto-detects your locale from the browser; override it here if you prefer.',
+		'settings.language_auto': 'Auto (browser)',
+		'settings.language_en': 'English',
+		'settings.language_ja': '日本語',
+
+		'range.last_12_months': 'Last 12 months',
+		'range.this_year': 'This year',
+		'range.last_year': 'Last year',
+
+		'common.show': 'Show',
+		'common.hide': 'Hide',
+
 		'settings.rates_heading': 'Exchange rates',
 		'settings.rates_description':
 			'kinketsu caches exchange rates against JPY so the dashboard total reflects all active subscriptions, regardless of currency.',
@@ -295,6 +309,20 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.notifications_result_one': '通知を 1 件送信しました。',
 		'settings.notifications_result_other': '通知を {count} 件送信しました。',
 
+		'settings.language_heading': '言語',
+		'settings.language_description':
+			'kinketsu はブラウザの言語設定から自動判定しますが、ここで手動で変更できます。',
+		'settings.language_auto': '自動 (ブラウザ)',
+		'settings.language_en': 'English',
+		'settings.language_ja': '日本語',
+
+		'range.last_12_months': '直近 12 ヶ月',
+		'range.this_year': '今年',
+		'range.last_year': '昨年',
+
+		'common.show': '表示',
+		'common.hide': '隠す',
+
 		'settings.rates_heading': '為替レート',
 		'settings.rates_description':
 			'kinketsu は為替レートをキャッシュして、ダッシュボードの合計を通貨横断で表示します。',
@@ -368,17 +396,30 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 	}
 };
 
+const LOCALE_STORAGE_KEY = 'kinketsu.locale';
+
 class I18n {
 	locale = $state<LocaleCode>('en');
 
 	init() {
-		if (typeof navigator === 'undefined') return;
-		const tag = navigator.language?.toLowerCase() ?? 'en';
-		this.locale = tag.startsWith('ja') ? 'ja' : 'en';
+		if (typeof window !== 'undefined') {
+			const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+			if (stored === 'en' || stored === 'ja') {
+				this.locale = stored;
+				return;
+			}
+		}
+		if (typeof navigator !== 'undefined') {
+			const tag = navigator.language?.toLowerCase() ?? 'en';
+			this.locale = tag.startsWith('ja') ? 'ja' : 'en';
+		}
 	}
 
 	setLocale(code: LocaleCode) {
 		this.locale = code;
+		if (typeof window !== 'undefined') {
+			window.localStorage.setItem(LOCALE_STORAGE_KEY, code);
+		}
 	}
 
 	get bcp47(): string {

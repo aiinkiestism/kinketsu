@@ -6,7 +6,8 @@
 use kinketsu_core::db;
 use kinketsu_core::llm::{LlmClient, LlmConfig};
 use kinketsu_core::models::{
-    Category, NewCategory, NewPaymentMethod, NewSubscription, PaymentMethod, Subscription,
+    Category, DetectionEvent, DetectionStatus, NewCategory, NewPaymentMethod, NewSubscription,
+    PaymentMethod, Subscription,
 };
 use kinketsu_core::parsers::{ParsedSubscriptionHint, extract_from_text};
 use sqlx::SqlitePool;
@@ -117,6 +118,78 @@ async fn set_llm_config(state: State<'_, AppState>, config: LlmConfig) -> Result
         .map_err(|e| e.to_string())
 }
 
+// ---- Detection events ----
+
+#[tauri::command]
+async fn list_detection_events(state: State<'_, AppState>) -> Result<Vec<DetectionEvent>, String> {
+    db::detection_events::list(&state.pool)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn confirm_detection_event(
+    state: State<'_, AppState>,
+    id: Uuid,
+) -> Result<Subscription, String> {
+    let ev = db::detection_events::get(&state.pool, id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "detection event not found".to_string())?;
+
+    let hint: ParsedSubscriptionHint = serde_json::from_value(ev.parsed_payload.clone())
+        .map_err(|e| format!("failed to decode payload: {e}"))?;
+
+    let name = hint.service_name.ok_or_else(|| "missing service_name".to_string())?;
+    let amount = hint
+        .amount_minor
+        .ok_or_else(|| "missing amount_minor".to_string())?;
+    let currency = hint
+        .currency
+        .ok_or_else(|| "missing currency".to_string())?;
+    let cycle = hint
+        .billing_cycle
+        .ok_or_else(|| "missing billing_cycle".to_string())?;
+
+    let new_sub = NewSubscription {
+        name,
+        service_icon: None,
+        plan: None,
+        amount_minor: amount,
+        currency,
+        billing_cycle: cycle,
+        next_billing_date: None,
+        started_at: hint.charged_at,
+        payment_method_id: None,
+        category_id: None,
+        status: None,
+        notes: hint.payment_method_hint.map(|h| format!("Payment hint: {h}")),
+    };
+    let sub = new_sub.into_subscription();
+
+    db::subscriptions::insert(&state.pool, &sub)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    db::detection_events::update_status(
+        &state.pool,
+        ev.id,
+        DetectionStatus::Confirmed,
+        Some(sub.id),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(sub)
+}
+
+#[tauri::command]
+async fn reject_detection_event(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
+    db::detection_events::update_status(&state.pool, id, DetectionStatus::Rejected, None)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // ---- Extraction pipeline ----
 
 #[tauri::command]
@@ -173,6 +246,9 @@ pub fn run() {
             get_llm_config,
             set_llm_config,
             extract_subscription_from_text,
+            list_detection_events,
+            confirm_detection_event,
+            reject_detection_event,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

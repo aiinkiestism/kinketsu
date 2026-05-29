@@ -158,3 +158,21 @@ export interface ParsedSubscriptionHint {
 	payment_method_hint: string | null;
 	charged_at: string | null;
 }
+
+// ---- Detection events ----
+
+export type DetectionSource = 'gmail' | 'paypal' | 'csv_import' | 'manual';
+export type DetectionStatus = 'pending' | 'confirmed' | 'rejected' | 'duplicate';
+
+export interface DetectionEvent {
+	id: string;
+	source: DetectionSource;
+	source_ref: string | null;
+	raw_summary: string | null;
+	parsed_payload: ParsedSubscriptionHint;
+	confidence: number;
+	status: DetectionStatus;
+	matched_subscription_id: string | null;
+	reviewed_at: string | null;
+	created_at: string;
+}

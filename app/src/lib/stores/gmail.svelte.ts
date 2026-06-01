@@ -2,12 +2,16 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { OAuthCredentials, YearMonth } from '$lib/types';
 
+export type ScanPhase = 'extracting' | 'indexing';
+
 export type ScanProgress = {
 	processed: number;
 	total: number;
 	created: number;
 	skippedClassified: number;
 	skippedSeen: number;
+	skippedBlocked?: number;
+	phase?: ScanPhase;
 };
 
 class GmailStore {
@@ -93,6 +97,14 @@ class GmailStore {
 	}
 
 	async runScan(range: YearMonth[]): Promise<number> {
+		return this.runScanInner('run_gmail_scan', range);
+	}
+
+	async runDeepScan(range: YearMonth[]): Promise<number> {
+		return this.runScanInner('run_gmail_deep_scan', range);
+	}
+
+	private async runScanInner(command: string, range: YearMonth[]): Promise<number> {
 		this.scanning = true;
 		this.error = null;
 		this.lastScanResult = null;
@@ -103,7 +115,7 @@ class GmailStore {
 			unlisten = await listen<ScanProgress>('scan-progress', (event) => {
 				this.progress = event.payload;
 			});
-			const created = await invoke<number>('run_gmail_scan', { range });
+			const created = await invoke<number>(command, { range });
 			this.lastScanResult = created;
 			return created;
 		} catch (e) {

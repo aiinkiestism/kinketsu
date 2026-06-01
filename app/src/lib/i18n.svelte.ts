@@ -197,6 +197,9 @@ const EN: Record<string, string> = {
 	'inbox.edit_confirm': 'Edit & confirm',
 	'inbox.reject': 'Reject',
 	'inbox.scan_run': 'Run Gmail scan',
+	'inbox.scan_run_deep': 'Deeper scan',
+	'inbox.scan_run_deep_hint':
+		'Broader Gmail query plus a multi-month recurrence filter. Slower but catches subscriptions that the default scan missed.',
 	'inbox.scan_running': 'Scanning…',
 	'inbox.scan_complete_zero': 'Scan complete — no new subscriptions detected.',
 	'inbox.scan_complete_one': 'Scan complete — 1 new detection.',
@@ -207,6 +210,7 @@ const EN: Record<string, string> = {
 	'inbox.scan_needs_llm': 'Configure an LLM provider in Settings first.',
 	'inbox.scan_cancelled': 'Scan cancelled.',
 	'inbox.scan_progress': 'Scanning… {processed}/{total} · {created} subscriptions detected',
+	'inbox.scan_progress_indexing': 'Indexing senders… {processed}/{total}',
 	'inbox.scan_progress_detail':
 		'{classified} skipped by LLM as not a subscription · {seen} already in inbox',
 

@@ -129,7 +129,7 @@
 		}
 	}
 
-	async function handleRunScan() {
+	async function runScanCommon(deep: boolean) {
 		scanFeedback = null;
 		if (!gmail.credentials) {
 			scanFeedback = t('inbox.scan_needs_creds');
@@ -148,7 +148,9 @@
 			return;
 		}
 		try {
-			const created = await gmail.runScan(scanRange);
+			const created = deep
+				? await gmail.runDeepScan(scanRange)
+				: await gmail.runScan(scanRange);
 			if (created === 0) {
 				scanFeedback = t('inbox.scan_complete_zero');
 			} else {
@@ -170,6 +172,14 @@
 				openErrorDialog(parseScanError(raw));
 			}
 		}
+	}
+
+	async function handleRunScan() {
+		await runScanCommon(false);
+	}
+
+	async function handleRunDeepScan() {
+		await runScanCommon(true);
 	}
 
 	async function handleCancelScan() {
@@ -307,11 +317,18 @@
 			{#if gmail.scanning}
 				<button type="button" class="scan-btn running" disabled>
 					{#if gmail.progress}
-						{t('inbox.scan_progress', {
-							processed: gmail.progress.processed,
-							total: gmail.progress.total,
-							created: gmail.progress.created
-						})}
+						{#if gmail.progress.phase === 'indexing'}
+							{t('inbox.scan_progress_indexing', {
+								processed: gmail.progress.processed,
+								total: gmail.progress.total
+							})}
+						{:else}
+							{t('inbox.scan_progress', {
+								processed: gmail.progress.processed,
+								total: gmail.progress.total,
+								created: gmail.progress.created
+							})}
+						{/if}
 					{:else}
 						{t('inbox.scan_running')}
 					{/if}
@@ -327,6 +344,15 @@
 					disabled={scanRange.length === 0}
 				>
 					{t('inbox.scan_run')}
+				</button>
+				<button
+					type="button"
+					class="scan-btn-deep"
+					onclick={handleRunDeepScan}
+					disabled={scanRange.length === 0}
+					title={t('inbox.scan_run_deep_hint')}
+				>
+					{t('inbox.scan_run_deep')}
 				</button>
 			{/if}
 			{#if scanFeedback}
@@ -568,6 +594,23 @@
 	}
 	.scan-btn.running {
 		opacity: 0.8;
+	}
+	.scan-btn-deep {
+		padding: 0.6rem 1.25rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		background: transparent;
+		color: var(--kk-text-primary);
+		font-weight: 600;
+		cursor: pointer;
+		font-family: inherit;
+	}
+	.scan-btn-deep:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.scan-btn-deep:hover:not(:disabled) {
+		background: var(--kk-surface-2);
 	}
 	.scan-cancel {
 		padding: 0.6rem 1rem;

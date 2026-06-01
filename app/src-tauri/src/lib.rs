@@ -3,10 +3,12 @@
 //! Holds the SQLite pool in app state and exposes the v0.1 commands the
 //! SvelteKit frontend calls via `@tauri-apps/api/core::invoke`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+use chrono::Datelike;
 
 use tokio::sync::oneshot;
 
@@ -492,6 +494,221 @@ async fn run_gmail_scan(
 
     log::info!(
         "gmail scan done: matched={total} created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract} skipped_classified={skipped_classified} skipped_blocked={skipped_blocked}"
+    );
+    Ok(created)
+}
+
+/// Stage 2 — broader Gmail keywords plus a multi-month recurrence filter.
+/// Only senders that appear in the selected range across 2+ distinct months
+/// proceed to the LLM. Use after Stage 1 if you suspect it missed real
+/// subscriptions hiding under non-tight keywords (Adobe Receipt, JR定期 etc.).
+#[tauri::command]
+#[specta::specta]
+async fn run_gmail_deep_scan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    range: Vec<YearMonthDto>,
+) -> Result<usize, String> {
+    let llm_cfg: LlmConfig = db::settings::get(&state.pool, db::settings::keys::LLM_CONFIG)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no LLM provider configured".to_string())?;
+
+    let creds: OAuthCredentials =
+        db::settings::get(&state.pool, db::settings::keys::GMAIL_OAUTH_CREDS)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Gmail OAuth credentials not configured".to_string())?;
+
+    let mut tokens: Tokens = db::settings::get(&state.pool, db::settings::keys::GMAIL_TOKENS)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Gmail not connected — click Connect Gmail first".to_string())?;
+
+    let access_token = oauth::ensure_access_token(&creds, &mut tokens)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    db::settings::set(&state.pool, db::settings::keys::GMAIL_TOKENS, &tokens)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let llm = LlmClient::from_config(llm_cfg);
+
+    let months: Vec<parsers::gmail::YearMonth> = range
+        .into_iter()
+        .map(|d| parsers::gmail::YearMonth {
+            year: d.year,
+            month: d.month,
+        })
+        .collect();
+
+    let query =
+        parsers::gmail::build_query_for_range(&months, parsers::gmail::ScanMode::Deep);
+    let msg_ids = parsers::gmail::list_message_ids(&access_token, &query)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    state.scan_cancel.store(false, Ordering::Relaxed);
+    let total = msg_ids.len();
+
+    // Phase 1 — header pass. Fetch each message and record (id, sender,
+    // year-month). Headers are cheap enough to fetch in series; no LLM cost.
+    type Header = (String, Option<String>, Option<(i32, u32)>);
+    let mut headers: Vec<Header> = Vec::with_capacity(total);
+    let mut by_sender: HashMap<String, HashSet<(i32, u32)>> = HashMap::new();
+
+    for (idx, id) in msg_ids.iter().enumerate() {
+        if state.scan_cancel.load(Ordering::Relaxed) {
+            return Err("scan cancelled".to_string());
+        }
+        let _ = app.emit(
+            "scan-progress",
+            serde_json::json!({
+                "processed": idx,
+                "total": total,
+                "created": 0,
+                "skippedClassified": 0,
+                "skippedSeen": 0,
+                "skippedBlocked": 0,
+                "phase": "indexing",
+            }),
+        );
+
+        match parsers::gmail::fetch_message(&access_token, id).await {
+            Ok(msg) => {
+                let r = parsers::gmail::message_ref_from(&msg, id);
+                let sender = r.from.as_deref().map(normalize_sender);
+                let ym = r.received_at.map(|d| (d.year(), d.month()));
+                if let (Some(ref s), Some(ym)) = (sender.as_ref(), ym) {
+                    by_sender.entry((*s).clone()).or_default().insert(ym);
+                }
+                headers.push((id.clone(), sender, ym));
+            }
+            Err(e) => {
+                log::warn!("deep scan: fetch_message({id}) failed in index pass: {e}");
+                headers.push((id.clone(), None, None));
+            }
+        }
+    }
+
+    let recurring: HashSet<String> = by_sender
+        .iter()
+        .filter(|(_, months)| months.len() >= 2)
+        .map(|(s, _)| s.clone())
+        .collect();
+    log::info!(
+        "deep scan index: senders={} recurring={}",
+        by_sender.len(),
+        recurring.len()
+    );
+
+    // Phase 2 — LLM extract only messages from senders with ≥2 months hits.
+    let candidates: Vec<&Header> = headers
+        .iter()
+        .filter(|(_, sender, _)| {
+            sender.as_ref().is_some_and(|s| recurring.contains(s))
+        })
+        .collect();
+    let cand_total = candidates.len();
+
+    let mut created = 0usize;
+    let mut skipped_seen = 0usize;
+    let mut skipped_blocked = 0usize;
+    let mut skipped_classified = 0usize;
+    let mut skipped_extract = 0usize;
+
+    for (idx, (id, sender, _)) in candidates.iter().enumerate() {
+        if state.scan_cancel.load(Ordering::Relaxed) {
+            return Err("scan cancelled".to_string());
+        }
+        let _ = app.emit(
+            "scan-progress",
+            serde_json::json!({
+                "processed": idx,
+                "total": cand_total,
+                "created": created,
+                "skippedClassified": skipped_classified,
+                "skippedSeen": skipped_seen,
+                "skippedBlocked": skipped_blocked,
+                "phase": "extracting",
+            }),
+        );
+
+        if db::detection_events::find_by_source_ref(&state.pool, DetectionSource::Gmail, id)
+            .await
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
+            skipped_seen += 1;
+            continue;
+        }
+
+        if let Some(s) = sender
+            && let Ok(Some(learned)) = db::learned_senders::find(&state.pool, s).await
+            && learned.decision == LearnedDecision::Block
+        {
+            skipped_blocked += 1;
+            continue;
+        }
+
+        let msg = match parsers::gmail::fetch_message(&access_token, id).await {
+            Ok(m) => m,
+            Err(e) => {
+                log::warn!("deep scan: fetch_message({id}) failed: {e}");
+                skipped_extract += 1;
+                continue;
+            }
+        };
+        let body = match parsers::gmail::extract_text_body(&msg) {
+            Some(b) => b,
+            None => {
+                skipped_extract += 1;
+                continue;
+            }
+        };
+        let hint_opt = match extract_from_text(&llm, body).await {
+            Ok(h) => h,
+            Err(e) => {
+                log::warn!("deep scan: LLM extract for {id} failed: {e}");
+                skipped_extract += 1;
+                continue;
+            }
+        };
+        let Some(hint) = hint_opt else {
+            skipped_classified += 1;
+            continue;
+        };
+
+        let msg_ref = parsers::gmail::message_ref_from(&msg, id);
+        let summary = msg_ref
+            .subject
+            .clone()
+            .unwrap_or_else(|| "(no subject)".to_string());
+        let payload = serde_json::to_value(&hint).map_err(|e| e.to_string())?;
+
+        let ev = DetectionEvent {
+            id: Uuid::now_v7(),
+            source: DetectionSource::Gmail,
+            source_ref: Some((*id).clone()),
+            raw_summary: Some(summary),
+            sender: sender.clone(),
+            parsed_payload: payload,
+            confidence: 0.0,
+            status: DetectionStatus::Pending,
+            matched_subscription_id: None,
+            reviewed_at: None,
+            created_at: chrono::Utc::now(),
+        };
+        db::detection_events::insert(&state.pool, &ev)
+            .await
+            .map_err(|e| e.to_string())?;
+        created += 1;
+    }
+
+    log::info!(
+        "deep scan done: matched={total} recurring={} extracted_candidates={cand_total} created={created} skipped_seen={skipped_seen} skipped_blocked={skipped_blocked} skipped_classified={skipped_classified} skipped_extract={skipped_extract}",
+        recurring.len()
     );
     Ok(created)
 }
@@ -1103,6 +1320,7 @@ pub fn run() {
             open_url,
             start_gmail_oauth,
             run_gmail_scan,
+            run_gmail_deep_scan,
             save_paypal_oauth_credentials,
             get_paypal_oauth_credentials,
             has_paypal_tokens,
@@ -1115,7 +1333,12 @@ pub fn run() {
     #[cfg(debug_assertions)]
     specta_builder
         .export(
-            specta_typescript::Typescript::default(),
+            // specta 2.0.0-rc.24 emits inline references to `Value` (from
+            // serde_json::Value, used in DetectionEvent.parsed_payload) but
+            // doesn't synthesize the alias itself. Inject it via the header so
+            // svelte-check stops choking on the regenerated file.
+            specta_typescript::Typescript::default()
+                .header("// @ts-nocheck\nexport type Value = unknown;\n"),
             "../src/lib/bindings.ts",
         )
         .expect("failed to export typescript bindings");

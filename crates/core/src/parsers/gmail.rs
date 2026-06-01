@@ -2,7 +2,7 @@
 //! and one-shot extraction via the configured LLM.
 
 use base64::Engine;
-use chrono::{Datelike, NaiveDate};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -44,6 +44,10 @@ pub struct GmailMessageRef {
     pub message_id: String,
     pub subject: Option<String>,
     pub from: Option<String>,
+    /// Best-effort timestamp the message was received. Prefers Gmail's
+    /// `internalDate` epoch (most accurate); falls back to the RFC 2822
+    /// `Date` header.
+    pub received_at: Option<DateTime<Utc>>,
 }
 
 fn last_day_of_month(year: i32, month: u32) -> u32 {
@@ -234,10 +238,26 @@ pub fn message_ref_from(message: &Value, id: &str) -> GmailMessageRef {
     let from = headers
         .and_then(|h| extract_header(h, "From"))
         .map(String::from);
+
+    // `internalDate` is the Gmail-side timestamp (epoch millis as a string).
+    // Fall back to the message's Date header if it's not present.
+    let received_at = message
+        .get("internalDate")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<i64>().ok())
+        .and_then(DateTime::from_timestamp_millis)
+        .or_else(|| {
+            headers
+                .and_then(|h| extract_header(h, "Date"))
+                .and_then(|d| DateTime::parse_from_rfc2822(d).ok())
+                .map(|dt| dt.with_timezone(&Utc))
+        });
+
     GmailMessageRef {
         message_id: id.to_string(),
         subject,
         from,
+        received_at,
     }
 }
 

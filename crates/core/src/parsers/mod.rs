@@ -14,6 +14,7 @@ use crate::models::BillingCycle;
 use crate::{Error, Result};
 
 pub mod gmail;
+pub mod redact;
 
 /// Structured output of the extraction pipeline. Every field is optional because
 /// real-world receipts vary widely in what they expose.
@@ -123,9 +124,12 @@ pub async fn extract_from_text(
     client: &LlmClient,
     content: String,
 ) -> Result<Option<ParsedSubscriptionHint>> {
+    // PII scrub before the body leaves the device for a remote provider.
+    // No-op for amounts / merchant names / dates the model actually needs.
+    let scrubbed = redact::redact(&content);
     let req = ExtractionRequest {
         system_prompt: SYSTEM_PROMPT.into(),
-        user_content: content,
+        user_content: scrubbed,
         schema: extraction_schema(),
     };
     let resp: ExtractionResponse = client.extract(req).await?;
@@ -165,9 +169,10 @@ pub async fn extract_many_from_text(
     client: &LlmClient,
     content: String,
 ) -> Result<Vec<ParsedSubscriptionHint>> {
+    let scrubbed = redact::redact(&content);
     let req = ExtractionRequest {
         system_prompt: MANY_SYSTEM_PROMPT.into(),
-        user_content: content,
+        user_content: scrubbed,
         schema: many_extraction_schema(),
     };
     let resp = client.extract(req).await?;

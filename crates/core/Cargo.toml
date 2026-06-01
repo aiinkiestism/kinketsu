@@ -23,6 +23,7 @@ sqlx = { workspace = true }
 reqwest = { workspace = true }
 base64 = { workspace = true }
 url = { workspace = true }
+regex = { workspace = true }
 specta = { workspace = true, features = ["chrono", "uuid", "serde_json"] }
 
 [lints]

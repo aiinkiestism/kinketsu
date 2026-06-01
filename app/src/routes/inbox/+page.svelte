@@ -179,13 +179,17 @@
 					<button type="button" class="secondary" onclick={() => gmail.disconnect()}
 						>{t('inbox.gmail_disconnect')}</button
 					>
+				{:else if gmail.connecting}
+					<button type="button" class="secondary" onclick={() => gmail.cancel()}>
+						{t('subs.cancel')}
+					</button>
 				{:else}
 					<button
 						type="button"
 						onclick={handleConnectGmail}
-						disabled={!gmail.credentials || gmail.connecting}
+						disabled={!gmail.credentials}
 					>
-						{gmail.connecting ? t('inbox.connect_gmail_loading') : t('inbox.connect_gmail')}
+						{t('inbox.connect_gmail')}
 					</button>
 				{/if}
 			</article>
@@ -204,13 +208,17 @@
 					<button type="button" class="secondary" onclick={() => paypal.disconnect()}
 						>{t('inbox.gmail_disconnect')}</button
 					>
+				{:else if paypal.connecting}
+					<button type="button" class="secondary" onclick={() => paypal.cancel()}>
+						{t('subs.cancel')}
+					</button>
 				{:else}
 					<button
 						type="button"
 						onclick={handleConnectPaypal}
-						disabled={!paypal.credentials || paypal.connecting}
+						disabled={!paypal.credentials}
 					>
-						{paypal.connecting ? t('inbox.connect_gmail_loading') : t('inbox.connect_paypal')}
+						{t('inbox.connect_paypal')}
 					</button>
 				{/if}
 			</article>

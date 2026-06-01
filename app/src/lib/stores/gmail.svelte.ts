@@ -56,6 +56,14 @@ class GmailStore {
 		}
 	}
 
+	async cancel() {
+		try {
+			await invoke('cancel_oauth');
+		} catch (e) {
+			this.error = String(e);
+		}
+	}
+
 	async disconnect() {
 		this.error = null;
 		try {

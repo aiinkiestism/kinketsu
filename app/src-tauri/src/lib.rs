@@ -4,6 +4,9 @@
 //! SvelteKit frontend calls via `@tauri-apps/api/core::invoke`.
 
 use std::collections::HashMap;
+use std::sync::Mutex as StdMutex;
+
+use tokio::sync::oneshot;
 
 use kinketsu_core::currency::ExchangeRate;
 use kinketsu_core::db;
@@ -23,6 +26,23 @@ use uuid::Uuid;
 
 pub struct AppState {
     pub pool: SqlitePool,
+    /// Cancellation signal for an in-flight OAuth flow (Gmail or PayPal).
+    /// Starting a new flow first cancels any previous one, so the UI's
+    /// Connect button is always responsive even if the previous attempt
+    /// silently failed (e.g. user closed the browser tab).
+    pub oauth_cancel: StdMutex<Option<oneshot::Sender<()>>>,
+}
+
+fn arm_oauth_cancel(state: &AppState) -> oneshot::Receiver<()> {
+    let (tx, rx) = oneshot::channel::<()>();
+    let mut guard = state.oauth_cancel.lock().expect("oauth_cancel mutex poisoned");
+    if let Some(prev) = guard.take() {
+        // Best-effort: receiver may already be dropped if the previous flow
+        // finished; that's fine and surfaces as `Err(())` we ignore.
+        let _ = prev.send(());
+    }
+    *guard = Some(tx);
+    rx
 }
 
 // ---- subscriptions ----
@@ -209,6 +229,21 @@ async fn disconnect_gmail(state: State<'_, AppState>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Abort any in-flight OAuth flow (Gmail or PayPal) so the UI can reset its
+/// connecting state without waiting for the 2-minute timeout to fire.
+#[tauri::command]
+#[specta::specta]
+async fn cancel_oauth(state: State<'_, AppState>) -> Result<(), String> {
+    let mut guard = state
+        .oauth_cancel
+        .lock()
+        .map_err(|_| "oauth_cancel mutex poisoned".to_string())?;
+    if let Some(tx) = guard.take() {
+        let _ = tx.send(());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 async fn start_gmail_oauth(state: State<'_, AppState>) -> Result<(), String> {
@@ -217,6 +252,8 @@ async fn start_gmail_oauth(state: State<'_, AppState>) -> Result<(), String> {
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "Gmail OAuth credentials not configured".to_string())?;
+
+    let cancel_rx = arm_oauth_cancel(&state);
 
     let (listener, port) = oauth::bind_oauth_listener()
         .await
@@ -230,13 +267,14 @@ async fn start_gmail_oauth(state: State<'_, AppState>) -> Result<(), String> {
 
     webbrowser::open(&auth_url).map_err(|e| format!("failed to open browser: {e}"))?;
 
-    let code = tokio::time::timeout(
-        std::time::Duration::from_secs(300),
-        oauth::wait_for_oauth_code(listener),
-    )
-    .await
-    .map_err(|_| "OAuth flow timed out after 5 minutes".to_string())?
-    .map_err(|e| e.to_string())?;
+    let code = tokio::select! {
+        biased;
+        _ = cancel_rx => return Err("oauth cancelled".into()),
+        res = oauth::wait_for_oauth_code(listener) => res.map_err(|e| e.to_string())?,
+        () = tokio::time::sleep(std::time::Duration::from_secs(120)) => {
+            return Err("OAuth flow timed out after 2 minutes — try Connect Gmail again.".into());
+        }
+    };
 
     let tokens = oauth::exchange_code_for_tokens(&creds, &code, &redirect_uri)
         .await
@@ -403,6 +441,8 @@ async fn start_paypal_oauth(state: State<'_, AppState>) -> Result<(), String> {
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "PayPal OAuth credentials not configured".to_string())?;
 
+    let cancel_rx = arm_oauth_cancel(&state);
+
     let (listener, port) = oauth::bind_oauth_listener()
         .await
         .map_err(|e| e.to_string())?;
@@ -415,13 +455,14 @@ async fn start_paypal_oauth(state: State<'_, AppState>) -> Result<(), String> {
 
     webbrowser::open(&auth_url).map_err(|e| format!("failed to open browser: {e}"))?;
 
-    let code = tokio::time::timeout(
-        std::time::Duration::from_secs(300),
-        oauth::wait_for_oauth_code(listener),
-    )
-    .await
-    .map_err(|_| "OAuth flow timed out after 5 minutes".to_string())?
-    .map_err(|e| e.to_string())?;
+    let code = tokio::select! {
+        biased;
+        _ = cancel_rx => return Err("oauth cancelled".into()),
+        res = oauth::wait_for_oauth_code(listener) => res.map_err(|e| e.to_string())?,
+        () = tokio::time::sleep(std::time::Duration::from_secs(120)) => {
+            return Err("OAuth flow timed out after 2 minutes — try Connect PayPal again.".into());
+        }
+    };
 
     let tokens = oauth::exchange_paypal_code(&creds, &code, &redirect_uri)
         .await
@@ -889,6 +930,7 @@ pub fn run() {
             get_gmail_oauth_credentials,
             has_gmail_tokens,
             disconnect_gmail,
+            cancel_oauth,
             start_gmail_oauth,
             run_gmail_scan,
             save_paypal_oauth_credentials,
@@ -944,7 +986,10 @@ pub fn run() {
                 }
             });
 
-            app.manage(AppState { pool });
+            app.manage(AppState {
+                pool,
+                oauth_cancel: StdMutex::new(None),
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

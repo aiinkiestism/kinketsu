@@ -99,3 +99,109 @@ pub fn export_subscriptions(subs: &[Subscription]) -> String {
     out.push_str("END:VCALENDAR\r\n");
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{Subscription, SubscriptionStatus};
+    use chrono::{NaiveDate, Utc};
+    use uuid::Uuid;
+
+    fn make_sub(name: &str, status: SubscriptionStatus, cycle: BillingCycle) -> Subscription {
+        let now = Utc::now();
+        Subscription {
+            id: Uuid::now_v7(),
+            name: name.into(),
+            service_icon: None,
+            plan: None,
+            amount_minor: 1500,
+            currency: "JPY".into(),
+            billing_cycle: cycle,
+            next_billing_date: Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()),
+            started_at: None,
+            payment_method_id: None,
+            category_id: None,
+            status,
+            notes: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn empty_subscriptions_emits_valid_calendar() {
+        let ics = export_subscriptions(&[]);
+        assert!(ics.starts_with("BEGIN:VCALENDAR\r\n"));
+        assert!(ics.contains("VERSION:2.0\r\n"));
+        assert!(ics.contains("PRODID:-//kinketsu//Subscription Tracker//EN\r\n"));
+        assert!(ics.contains("END:VCALENDAR\r\n"));
+        assert!(!ics.contains("BEGIN:VEVENT"));
+    }
+
+    #[test]
+    fn active_monthly_sub_emits_event_with_rrule() {
+        let sub = make_sub("Netflix", SubscriptionStatus::Active, BillingCycle::Monthly);
+        let ics = export_subscriptions(&[sub]);
+        assert!(ics.contains("BEGIN:VEVENT\r\n"));
+        assert!(ics.contains("DTSTART;VALUE=DATE:20260701\r\n"));
+        assert!(ics.contains("SUMMARY:Netflix renewal\r\n"));
+        assert!(ics.contains("RRULE:FREQ=MONTHLY\r\n"));
+        assert!(ics.contains("END:VEVENT\r\n"));
+    }
+
+    #[test]
+    fn rrules_match_each_billing_cycle() {
+        let cases = [
+            (BillingCycle::Weekly, "RRULE:FREQ=WEEKLY"),
+            (BillingCycle::Monthly, "RRULE:FREQ=MONTHLY"),
+            (BillingCycle::Quarterly, "RRULE:FREQ=MONTHLY;INTERVAL=3"),
+            (BillingCycle::SemiAnnual, "RRULE:FREQ=MONTHLY;INTERVAL=6"),
+            (BillingCycle::Annual, "RRULE:FREQ=YEARLY"),
+        ];
+        for (cycle, expected) in cases {
+            let sub = make_sub("X", SubscriptionStatus::Active, cycle);
+            let ics = export_subscriptions(&[sub]);
+            assert!(
+                ics.contains(expected),
+                "cycle {cycle:?} did not emit {expected} in:\n{ics}"
+            );
+        }
+    }
+
+    #[test]
+    fn custom_cycle_omits_rrule() {
+        let sub = make_sub("X", SubscriptionStatus::Active, BillingCycle::Custom);
+        let ics = export_subscriptions(&[sub]);
+        assert!(ics.contains("BEGIN:VEVENT"));
+        assert!(!ics.contains("RRULE:"));
+    }
+
+    #[test]
+    fn cancelled_subs_are_skipped() {
+        let sub = make_sub("Old", SubscriptionStatus::Cancelled, BillingCycle::Monthly);
+        let ics = export_subscriptions(&[sub]);
+        assert!(!ics.contains("BEGIN:VEVENT"));
+    }
+
+    #[test]
+    fn subs_without_next_billing_date_are_skipped() {
+        let mut sub = make_sub("Y", SubscriptionStatus::Active, BillingCycle::Monthly);
+        sub.next_billing_date = None;
+        let ics = export_subscriptions(&[sub]);
+        assert!(!ics.contains("BEGIN:VEVENT"));
+    }
+
+    #[test]
+    fn special_characters_get_escaped_in_summary() {
+        let mut sub = make_sub(
+            "Adobe; Inc, all\\products",
+            SubscriptionStatus::Active,
+            BillingCycle::Monthly,
+        );
+        sub.plan = Some("Pro\nTier".to_string());
+        let ics = export_subscriptions(&[sub]);
+        assert!(ics.contains("Adobe\\; Inc\\, all\\\\products"));
+        // Plan ends up in DESCRIPTION which also needs escaping
+        assert!(ics.contains("Pro\\nTier"));
+    }
+}

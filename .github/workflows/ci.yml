@@ -43,6 +43,9 @@ jobs:
       - name: cargo clippy (core + server)
         run: cargo clippy --workspace --exclude kinketsu-app -- -D warnings
 
+      - name: cargo test (core)
+        run: cargo test -p kinketsu-core --all-targets
+
   frontend:
     name: SvelteKit (check + build)
     runs-on: ubuntu-latest

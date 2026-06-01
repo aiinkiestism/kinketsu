@@ -853,8 +853,8 @@ async fn extract_subscription_from_text(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let specta_builder = tauri_specta::Builder::<tauri::Wry>::new().commands(
-        tauri_specta::collect_commands![
+    let specta_builder =
+        tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
             list_subscriptions,
             create_subscription,
             update_subscription,
@@ -898,8 +898,7 @@ pub fn run() {
             start_paypal_oauth,
             run_paypal_scan,
             check_renewals_now,
-        ],
-    );
+        ]);
 
     #[cfg(debug_assertions)]
     specta_builder

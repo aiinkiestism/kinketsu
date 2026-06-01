@@ -5,11 +5,11 @@
 //! long random string and pass it as `Authorization: Bearer <secret>`.
 
 use axum::Json;
+use axum::Router;
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::Router;
 use axum::routing::{get, post, put};
 use serde_json::json;
 use sqlx::SqlitePool;
@@ -75,10 +75,7 @@ async fn main() -> anyhow::Result<()> {
             "/payment-methods/:id",
             put(update_payment_method).delete(delete_payment_method),
         )
-        .route(
-            "/categories",
-            get(list_categories).post(create_category),
-        )
+        .route("/categories", get(list_categories).post(create_category))
         .route(
             "/categories/:id",
             put(update_category).delete(delete_category),
@@ -97,7 +94,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/scan/text", post(scan_text))
         .route("/scan/csv", post(scan_csv))
         .route("/ics", get(export_ics))
-        .layer(middleware::from_fn_with_state(state.clone(), require_secret));
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_secret,
+        ));
 
     let app = Router::new()
         .route("/health", get(health))
@@ -122,11 +122,7 @@ async fn require_secret(State(s): State<AppState>, req: Request, next: Next) -> 
     if auth == Some(expected.as_str()) {
         next.run(req).await
     } else {
-        (
-            StatusCode::UNAUTHORIZED,
-            "missing or invalid bearer token",
-        )
-            .into_response()
+        (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response()
     }
 }
 
@@ -150,7 +146,9 @@ fn not_found(msg: impl Into<String>) -> ApiError {
 
 // ---- subscriptions ----
 
-async fn list_subscriptions(State(s): State<AppState>) -> Result<Json<Vec<Subscription>>, ApiError> {
+async fn list_subscriptions(
+    State(s): State<AppState>,
+) -> Result<Json<Vec<Subscription>>, ApiError> {
     Ok(Json(db::subscriptions::list(&s.pool).await.map_err(err)?))
 }
 
@@ -184,9 +182,7 @@ async fn delete_subscription(
     State(s): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    db::subscriptions::delete(&s.pool, id)
-        .await
-        .map_err(err)?;
+    db::subscriptions::delete(&s.pool, id).await.map_err(err)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -195,9 +191,7 @@ async fn delete_subscription(
 async fn list_payment_methods(
     State(s): State<AppState>,
 ) -> Result<Json<Vec<PaymentMethod>>, ApiError> {
-    Ok(Json(
-        db::payment_methods::list(&s.pool).await.map_err(err)?,
-    ))
+    Ok(Json(db::payment_methods::list(&s.pool).await.map_err(err)?))
 }
 
 async fn create_payment_method(
@@ -293,10 +287,18 @@ async fn confirm_detection_event(
 
     let hint: ParsedSubscriptionHint =
         serde_json::from_value(ev.parsed_payload.clone()).map_err(err)?;
-    let name = hint.service_name.ok_or_else(|| bad_request("missing service_name"))?;
-    let amount = hint.amount_minor.ok_or_else(|| bad_request("missing amount_minor"))?;
-    let currency = hint.currency.ok_or_else(|| bad_request("missing currency"))?;
-    let cycle = hint.billing_cycle.ok_or_else(|| bad_request("missing billing_cycle"))?;
+    let name = hint
+        .service_name
+        .ok_or_else(|| bad_request("missing service_name"))?;
+    let amount = hint
+        .amount_minor
+        .ok_or_else(|| bad_request("missing amount_minor"))?;
+    let currency = hint
+        .currency
+        .ok_or_else(|| bad_request("missing currency"))?;
+    let cycle = hint
+        .billing_cycle
+        .ok_or_else(|| bad_request("missing billing_cycle"))?;
 
     let new_sub = NewSubscription {
         name,
@@ -310,18 +312,17 @@ async fn confirm_detection_event(
         payment_method_id: None,
         category_id: None,
         status: None,
-        notes: hint.payment_method_hint.map(|h| format!("Payment hint: {h}")),
+        notes: hint
+            .payment_method_hint
+            .map(|h| format!("Payment hint: {h}")),
     };
     let sub = new_sub.into_subscription();
-    db::subscriptions::insert(&s.pool, &sub).await.map_err(err)?;
-    db::detection_events::update_status(
-        &s.pool,
-        ev.id,
-        DetectionStatus::Confirmed,
-        Some(sub.id),
-    )
-    .await
-    .map_err(err)?;
+    db::subscriptions::insert(&s.pool, &sub)
+        .await
+        .map_err(err)?;
+    db::detection_events::update_status(&s.pool, ev.id, DetectionStatus::Confirmed, Some(sub.id))
+        .await
+        .map_err(err)?;
     Ok(Json(sub))
 }
 
@@ -439,7 +440,9 @@ async fn scan_csv(
             reviewed_at: None,
             created_at: chrono::Utc::now(),
         };
-        db::detection_events::insert(&s.pool, &ev).await.map_err(err)?;
+        db::detection_events::insert(&s.pool, &ev)
+            .await
+            .map_err(err)?;
         created += 1;
     }
     Ok(Json(json!({ "created": created })))

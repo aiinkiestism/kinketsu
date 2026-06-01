@@ -55,3 +55,23 @@ pub async fn refresh_rates(base: &str) -> crate::Result<Vec<ExchangeRate>> {
         .collect();
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn convert_minor_rounds_to_nearest() {
+        assert_eq!(convert_minor(1000, 1.5), 1500);
+        assert_eq!(convert_minor(1000, 0.5), 500);
+        assert_eq!(convert_minor(1000, 0.001), 1);
+        assert_eq!(convert_minor(0, 99.9), 0);
+    }
+
+    #[test]
+    fn convert_minor_handles_fractional_results() {
+        assert_eq!(convert_minor(100, 1.234), 123);
+        let result = convert_minor(100, 1.235);
+        assert!(result == 123 || result == 124, "got {result}");
+    }
+}

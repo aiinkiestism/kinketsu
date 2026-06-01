@@ -104,17 +104,36 @@ pub async fn wait_for_oauth_code(listener: TcpListener) -> Result<String> {
     Ok(code)
 }
 
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push(((h * 16) + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        if bytes[i] == b'+' {
+            out.push(b' ');
+        } else {
+            out.push(bytes[i]);
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 fn extract_query_param(path: &str, key: &str) -> Option<String> {
     let (_, query) = path.split_once('?')?;
     for pair in query.split('&') {
         let (k, v) = pair.split_once('=')?;
         if k == key {
-            return Some(
-                url::form_urlencoded::parse(v.as_bytes())
-                    .next()
-                    .map(|(_, v)| v.into_owned())
-                    .unwrap_or_else(|| v.to_string()),
-            );
+            return Some(percent_decode(v));
         }
     }
     None
@@ -315,4 +334,69 @@ pub async fn ensure_access_token(creds: &OAuthCredentials, tokens: &mut Tokens) 
     tokens.access_token = Some(new_token.clone());
     tokens.expires_at = Some(new_expires);
     Ok(new_token)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_auth_url_includes_required_query_params() {
+        let url = build_auth_url(
+            "abc.apps.googleusercontent.com",
+            "http://127.0.0.1:1234/callback",
+            &[GMAIL_READONLY_SCOPE],
+        );
+        assert!(url.starts_with(AUTH_URL));
+        assert!(url.contains("response_type=code"));
+        assert!(url.contains("client_id=abc.apps.googleusercontent.com"));
+        assert!(url.contains("access_type=offline"));
+        assert!(url.contains("prompt=consent"));
+    }
+
+    #[test]
+    fn build_auth_url_percent_encodes_redirect_and_scope() {
+        let url = build_auth_url(
+            "x",
+            "http://127.0.0.1:9000/oauth callback",
+            &["scope1", "scope2"],
+        );
+        // Space → +
+        assert!(url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A9000%2Foauth+callback"));
+        // Joined scope is percent-encoded too (space becomes +)
+        assert!(url.contains("scope=scope1+scope2"));
+    }
+
+    #[test]
+    fn paypal_auth_url_uses_paypal_endpoint_and_no_access_type() {
+        let url = build_paypal_auth_url("paypal-id", "http://127.0.0.1:9/cb", &["openid"]);
+        assert!(url.starts_with(PAYPAL_AUTH_URL));
+        assert!(url.contains("client_id=paypal-id"));
+        assert!(!url.contains("access_type=offline"));
+    }
+
+    #[test]
+    fn extract_query_param_returns_value_when_present() {
+        let path = "/callback?code=abc123&state=xyz";
+        assert_eq!(
+            extract_query_param(path, "code"),
+            Some("abc123".to_string())
+        );
+        assert_eq!(extract_query_param(path, "state"), Some("xyz".to_string()));
+    }
+
+    #[test]
+    fn extract_query_param_returns_none_when_missing() {
+        assert_eq!(extract_query_param("/callback?code=abc", "state"), None);
+        assert_eq!(extract_query_param("/callback", "code"), None);
+    }
+
+    #[test]
+    fn extract_query_param_decodes_percent_escapes() {
+        let path = "/callback?code=4%2F0Ab%2Cxyz";
+        assert_eq!(
+            extract_query_param(path, "code"),
+            Some("4/0Ab,xyz".to_string())
+        );
+    }
 }

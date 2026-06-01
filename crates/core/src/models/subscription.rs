@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, specta::Type)]
 pub struct Subscription {
     pub id: Uuid,
     pub name: String,
@@ -23,7 +23,7 @@ pub struct Subscription {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type, specta::Type)]
 #[sqlx(rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum BillingCycle {
@@ -35,7 +35,7 @@ pub enum BillingCycle {
     Custom,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type, specta::Type)]
 #[sqlx(rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionStatus {
@@ -46,7 +46,7 @@ pub enum SubscriptionStatus {
 }
 
 /// Input DTO for creating a subscription. The server fills in `id` and timestamps.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct NewSubscription {
     pub name: String,
     pub service_icon: Option<String>,

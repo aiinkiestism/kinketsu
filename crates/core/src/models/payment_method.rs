@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, specta::Type)]
 pub struct PaymentMethod {
     pub id: Uuid,
     pub name: String,
@@ -14,7 +14,7 @@ pub struct PaymentMethod {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type, specta::Type)]
 #[sqlx(rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum PaymentMethodKind {
@@ -33,7 +33,7 @@ pub enum PaymentMethodKind {
 }
 
 /// Input DTO for creating a payment method. The server fills in `id` and timestamps.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct NewPaymentMethod {
     pub name: String,
     pub kind: PaymentMethodKind,

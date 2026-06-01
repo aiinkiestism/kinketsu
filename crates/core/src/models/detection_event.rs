@@ -8,7 +8,7 @@ use uuid::Uuid;
 ///
 /// Stored separately from `Subscription` so the user can audit and correct the
 /// extraction pipeline.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DetectionEvent {
     pub id: Uuid,
     pub source: DetectionSource,
@@ -23,7 +23,7 @@ pub struct DetectionEvent {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type, specta::Type)]
 #[sqlx(rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum DetectionSource {
@@ -33,7 +33,7 @@ pub enum DetectionSource {
     Manual,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type, specta::Type)]
 #[sqlx(rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum DetectionStatus {

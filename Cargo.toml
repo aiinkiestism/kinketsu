@@ -74,6 +74,13 @@ tower-http = { version = "0.6", features = ["trace", "cors"] }
 # Internal crates
 kinketsu-core = { path = "crates/core" }
 
+# Type bindings (Rust → TypeScript).
+# specta + tauri-specta + specta-typescript move in lock-step — pinned
+# exact compatible versions to avoid resolver drift on the RC track.
+specta = { version = "=2.0.0-rc.24", features = ["derive"] }
+specta-typescript = "=0.0.11"
+tauri-specta = { version = "=2.0.0-rc.24", features = ["derive", "typescript"] }
+
 [profile.dev]
 opt-level = 0
 debug = true

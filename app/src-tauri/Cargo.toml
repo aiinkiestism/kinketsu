@@ -29,6 +29,9 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 tokio = { workspace = true }
 webbrowser = "1"
+specta = { workspace = true, features = ["chrono", "uuid", "serde_json"] }
+specta-typescript = { workspace = true }
+tauri-specta = { workspace = true }
 
 [lints]
 workspace = true

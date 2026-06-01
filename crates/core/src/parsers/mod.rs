@@ -17,7 +17,7 @@ pub mod gmail;
 
 /// Structured output of the extraction pipeline. Every field is optional because
 /// real-world receipts vary widely in what they expose.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ParsedSubscriptionHint {
     pub service_name: Option<String>,
     pub amount_minor: Option<i64>,

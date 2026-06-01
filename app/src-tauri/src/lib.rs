@@ -24,6 +24,7 @@ pub struct AppState {
 // ---- subscriptions ----
 
 #[tauri::command]
+#[specta::specta]
 async fn list_subscriptions(state: State<'_, AppState>) -> Result<Vec<Subscription>, String> {
     db::subscriptions::list(&state.pool)
         .await
@@ -31,6 +32,7 @@ async fn list_subscriptions(state: State<'_, AppState>) -> Result<Vec<Subscripti
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn create_subscription(
     state: State<'_, AppState>,
     input: NewSubscription,
@@ -43,6 +45,7 @@ async fn create_subscription(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn update_subscription(state: State<'_, AppState>, sub: Subscription) -> Result<(), String> {
     let mut updated = sub;
     updated.updated_at = chrono::Utc::now();
@@ -52,6 +55,7 @@ async fn update_subscription(state: State<'_, AppState>, sub: Subscription) -> R
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn delete_subscription(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
     db::subscriptions::delete(&state.pool, id)
         .await
@@ -61,6 +65,7 @@ async fn delete_subscription(state: State<'_, AppState>, id: Uuid) -> Result<(),
 // ---- payment methods ----
 
 #[tauri::command]
+#[specta::specta]
 async fn list_payment_methods(state: State<'_, AppState>) -> Result<Vec<PaymentMethod>, String> {
     db::payment_methods::list(&state.pool)
         .await
@@ -68,6 +73,7 @@ async fn list_payment_methods(state: State<'_, AppState>) -> Result<Vec<PaymentM
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn create_payment_method(
     state: State<'_, AppState>,
     input: NewPaymentMethod,
@@ -80,6 +86,7 @@ async fn create_payment_method(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn update_payment_method(
     state: State<'_, AppState>,
     pm: PaymentMethod,
@@ -92,6 +99,7 @@ async fn update_payment_method(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn delete_payment_method(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
     db::payment_methods::delete(&state.pool, id)
         .await
@@ -101,6 +109,7 @@ async fn delete_payment_method(state: State<'_, AppState>, id: Uuid) -> Result<(
 // ---- categories ----
 
 #[tauri::command]
+#[specta::specta]
 async fn list_categories(state: State<'_, AppState>) -> Result<Vec<Category>, String> {
     db::categories::list(&state.pool)
         .await
@@ -108,6 +117,7 @@ async fn list_categories(state: State<'_, AppState>) -> Result<Vec<Category>, St
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn create_category(
     state: State<'_, AppState>,
     input: NewCategory,
@@ -120,6 +130,7 @@ async fn create_category(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn update_category(state: State<'_, AppState>, cat: Category) -> Result<(), String> {
     let mut updated = cat;
     updated.updated_at = chrono::Utc::now();
@@ -129,6 +140,7 @@ async fn update_category(state: State<'_, AppState>, cat: Category) -> Result<()
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn delete_category(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
     db::categories::delete(&state.pool, id)
         .await
@@ -138,6 +150,7 @@ async fn delete_category(state: State<'_, AppState>, id: Uuid) -> Result<(), Str
 // ---- LLM provider configuration ----
 
 #[tauri::command]
+#[specta::specta]
 async fn get_llm_config(state: State<'_, AppState>) -> Result<Option<LlmConfig>, String> {
     db::settings::get::<LlmConfig>(&state.pool, db::settings::keys::LLM_CONFIG)
         .await
@@ -145,6 +158,7 @@ async fn get_llm_config(state: State<'_, AppState>) -> Result<Option<LlmConfig>,
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn set_llm_config(state: State<'_, AppState>, config: LlmConfig) -> Result<(), String> {
     db::settings::set(&state.pool, db::settings::keys::LLM_CONFIG, &config)
         .await
@@ -154,6 +168,7 @@ async fn set_llm_config(state: State<'_, AppState>, config: LlmConfig) -> Result
 // ---- Gmail OAuth + scan ----
 
 #[tauri::command]
+#[specta::specta]
 async fn save_gmail_oauth_credentials(
     state: State<'_, AppState>,
     creds: OAuthCredentials,
@@ -164,6 +179,7 @@ async fn save_gmail_oauth_credentials(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn get_gmail_oauth_credentials(
     state: State<'_, AppState>,
 ) -> Result<Option<OAuthCredentials>, String> {
@@ -173,6 +189,7 @@ async fn get_gmail_oauth_credentials(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn has_gmail_tokens(state: State<'_, AppState>) -> Result<bool, String> {
     let tokens: Option<Tokens> = db::settings::get(&state.pool, db::settings::keys::GMAIL_TOKENS)
         .await
@@ -181,6 +198,7 @@ async fn has_gmail_tokens(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn disconnect_gmail(state: State<'_, AppState>) -> Result<(), String> {
     db::settings::delete(&state.pool, db::settings::keys::GMAIL_TOKENS)
         .await
@@ -188,6 +206,7 @@ async fn disconnect_gmail(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn start_gmail_oauth(state: State<'_, AppState>) -> Result<(), String> {
     let creds: OAuthCredentials =
         db::settings::get(&state.pool, db::settings::keys::GMAIL_OAUTH_CREDS)
@@ -226,13 +245,14 @@ async fn start_gmail_oauth(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, specta::Type)]
 pub struct YearMonthDto {
     pub year: i32,
     pub month: u32,
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn run_gmail_scan(
     state: State<'_, AppState>,
     range: Vec<YearMonthDto>,
@@ -333,6 +353,7 @@ async fn run_gmail_scan(
 // ---- PayPal OAuth ----
 
 #[tauri::command]
+#[specta::specta]
 async fn save_paypal_oauth_credentials(
     state: State<'_, AppState>,
     creds: OAuthCredentials,
@@ -343,6 +364,7 @@ async fn save_paypal_oauth_credentials(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn get_paypal_oauth_credentials(
     state: State<'_, AppState>,
 ) -> Result<Option<OAuthCredentials>, String> {
@@ -352,6 +374,7 @@ async fn get_paypal_oauth_credentials(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn has_paypal_tokens(state: State<'_, AppState>) -> Result<bool, String> {
     let tokens: Option<Tokens> = db::settings::get(&state.pool, db::settings::keys::PAYPAL_TOKENS)
         .await
@@ -360,6 +383,7 @@ async fn has_paypal_tokens(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn disconnect_paypal(state: State<'_, AppState>) -> Result<(), String> {
     db::settings::delete(&state.pool, db::settings::keys::PAYPAL_TOKENS)
         .await
@@ -367,6 +391,7 @@ async fn disconnect_paypal(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn start_paypal_oauth(state: State<'_, AppState>) -> Result<(), String> {
     let creds: OAuthCredentials =
         db::settings::get(&state.pool, db::settings::keys::PAYPAL_OAUTH_CREDS)
@@ -406,6 +431,7 @@ async fn start_paypal_oauth(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn run_paypal_scan(state: State<'_, AppState>) -> Result<usize, String> {
     // PayPal's Transaction Search API is business-tier only — personal
     // accounts get a 403 regardless of OAuth scope. We still exercise token
@@ -459,6 +485,7 @@ async fn notify_renewals(handle: &AppHandle, pool: &SqlitePool) -> Result<usize,
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn check_renewals_now(state: State<'_, AppState>, app: AppHandle) -> Result<usize, String> {
     notify_renewals(&app, &state.pool).await
 }
@@ -466,6 +493,7 @@ async fn check_renewals_now(state: State<'_, AppState>, app: AppHandle) -> Resul
 // ---- iCalendar export ----
 
 #[tauri::command]
+#[specta::specta]
 async fn export_subscriptions_ics(state: State<'_, AppState>) -> Result<String, String> {
     let subs = db::subscriptions::list(&state.pool)
         .await
@@ -476,6 +504,7 @@ async fn export_subscriptions_ics(state: State<'_, AppState>) -> Result<String, 
 // ---- User preferences ----
 
 #[tauri::command]
+#[specta::specta]
 async fn get_default_currency(state: State<'_, AppState>) -> Result<Option<String>, String> {
     db::settings::get::<String>(&state.pool, db::settings::keys::DEFAULT_CURRENCY)
         .await
@@ -483,6 +512,7 @@ async fn get_default_currency(state: State<'_, AppState>) -> Result<Option<Strin
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn set_default_currency(state: State<'_, AppState>, currency: String) -> Result<(), String> {
     db::settings::set(&state.pool, db::settings::keys::DEFAULT_CURRENCY, &currency)
         .await
@@ -492,6 +522,7 @@ async fn set_default_currency(state: State<'_, AppState>, currency: String) -> R
 // ---- Exchange rates ----
 
 #[tauri::command]
+#[specta::specta]
 async fn refresh_exchange_rates(state: State<'_, AppState>, base: String) -> Result<usize, String> {
     let rates = kinketsu_core::currency::refresh_rates(&base)
         .await
@@ -506,6 +537,7 @@ async fn refresh_exchange_rates(state: State<'_, AppState>, base: String) -> Res
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn list_exchange_rates(
     state: State<'_, AppState>,
     base: String,
@@ -518,6 +550,7 @@ async fn list_exchange_rates(
 // ---- Detection events ----
 
 #[tauri::command]
+#[specta::specta]
 async fn list_detection_events(state: State<'_, AppState>) -> Result<Vec<DetectionEvent>, String> {
     db::detection_events::list(&state.pool)
         .await
@@ -525,6 +558,7 @@ async fn list_detection_events(state: State<'_, AppState>) -> Result<Vec<Detecti
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn confirm_detection_event(
     state: State<'_, AppState>,
     id: Uuid,
@@ -585,6 +619,7 @@ async fn confirm_detection_event(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn confirm_detection_event_with_overrides(
     state: State<'_, AppState>,
     id: Uuid,
@@ -613,6 +648,7 @@ async fn confirm_detection_event_with_overrides(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn reject_detection_event(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
     db::detection_events::update_status(&state.pool, id, DetectionStatus::Rejected, None)
         .await
@@ -622,6 +658,7 @@ async fn reject_detection_event(state: State<'_, AppState>, id: Uuid) -> Result<
 // ---- Extraction pipeline ----
 
 #[tauri::command]
+#[specta::specta]
 async fn extract_subscription_from_text(
     state: State<'_, AppState>,
     text: String,
@@ -639,44 +676,8 @@ async fn extract_subscription_from_text(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
-        .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
-
-            let app_data_dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&app_data_dir)?;
-            let db_path = app_data_dir.join("kinketsu.db");
-
-            let pool = tauri::async_runtime::block_on(async {
-                let pool = db::connect_file(&db_path).await?;
-                db::migrate(&pool).await?;
-                Ok::<SqlitePool, kinketsu_core::Error>(pool)
-            })?;
-
-            // Daily renewal check — fires 15s after launch then every 24h.
-            let scheduler_pool = pool.clone();
-            let scheduler_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-                loop {
-                    if let Err(e) = notify_renewals(&scheduler_handle, &scheduler_pool).await {
-                        log::warn!("renewal notification check failed: {e}");
-                    }
-                    tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
-                }
-            });
-
-            app.manage(AppState { pool });
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
+    let specta_builder = tauri_specta::Builder::<tauri::Wry>::new().commands(
+        tauri_specta::collect_commands![
             list_subscriptions,
             create_subscription,
             update_subscription,
@@ -714,7 +715,56 @@ pub fn run() {
             start_paypal_oauth,
             run_paypal_scan,
             check_renewals_now,
-        ])
+        ],
+    );
+
+    #[cfg(debug_assertions)]
+    specta_builder
+        .export(
+            specta_typescript::Typescript::default(),
+            "../src/lib/bindings.ts",
+        )
+        .expect("failed to export typescript bindings");
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
+        .invoke_handler(specta_builder.invoke_handler())
+        .setup(move |app| {
+            specta_builder.mount_events(app);
+            if cfg!(debug_assertions) {
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        .build(),
+                )?;
+            }
+
+            let app_data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&app_data_dir)?;
+            let db_path = app_data_dir.join("kinketsu.db");
+
+            let pool = tauri::async_runtime::block_on(async {
+                let pool = db::connect_file(&db_path).await?;
+                db::migrate(&pool).await?;
+                Ok::<SqlitePool, kinketsu_core::Error>(pool)
+            })?;
+
+            // Daily renewal check — fires 15s after launch then every 24h.
+            let scheduler_pool = pool.clone();
+            let scheduler_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                loop {
+                    if let Err(e) = notify_renewals(&scheduler_handle, &scheduler_pool).await {
+                        log::warn!("renewal notification check failed: {e}");
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
+                }
+            });
+
+            app.manage(AppState { pool });
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -27,13 +27,13 @@ const PAYPAL_TOKEN_URL: &str = "https://api-m.paypal.com/v1/oauth2/token";
 pub const PAYPAL_OPENID_SCOPE: &str = "openid";
 pub const PAYPAL_TRANSACTIONS_SCOPE: &str = "https://uri.paypal.com/services/reporting/search/read";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 pub struct OAuthCredentials {
     pub client_id: String,
     pub client_secret: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Tokens {
     pub refresh_token: String,
     pub access_token: Option<String>,

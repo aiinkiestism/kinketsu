@@ -14,7 +14,7 @@ pub mod lmstudio;
 pub mod ollama;
 pub mod openai;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(tag = "provider", rename_all = "snake_case")]
 pub enum LlmConfig {
     Claude {

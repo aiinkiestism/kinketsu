@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, specta::Type)]
 pub struct Category {
     pub id: Uuid,
     pub name: String,
@@ -13,7 +13,7 @@ pub struct Category {
 }
 
 /// Input DTO for creating a category. The server fills in `id` and timestamps.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct NewCategory {
     pub name: String,
     pub icon: Option<String>,

@@ -14,7 +14,7 @@ const API_BASE: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
 const SEARCH_KEYWORDS: &str = "(invoice OR receipt OR subscription OR \"recurring payment\" OR renewal OR \"請求\" OR \"明細\" OR \"領収\")";
 const BODY_CHAR_LIMIT: usize = 8000;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
 pub struct YearMonth {
     pub year: i32,
     pub month: u32,

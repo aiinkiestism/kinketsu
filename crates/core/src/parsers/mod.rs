@@ -27,7 +27,7 @@ pub struct ParsedSubscriptionHint {
     pub charged_at: Option<NaiveDate>,
 }
 
-const SYSTEM_PROMPT: &str = "You are a structured-data extractor. Read the user-provided text (typically a subscription confirmation or renewal email) and extract the subscription fields. If a field is not clearly present, omit it. Use ISO 4217 currency codes (e.g. JPY, USD). For amount_minor, return the smallest unit of the currency — yen for JPY (no decimals), cents for USD/EUR/etc. billing_cycle must be one of: weekly, monthly, quarterly, semi_annual, annual, custom. charged_at is the ISO 8601 date the charge applies to (YYYY-MM-DD).";
+const SYSTEM_PROMPT: &str = "You are a structured-data extractor. Read the user-provided text (typically a subscription confirmation or renewal email) and extract the subscription fields.\n\nCRITICAL rules for missing data: If a field is not clearly present in the text, OMIT THE PROPERTY ENTIRELY from your output. Do NOT emit placeholder strings such as \"<UNKNOWN>\", \"unknown\", \"N/A\", \"null\", \"?\", \"-\", or empty strings — they break downstream type validation. Only emit a property when you have a real value for it.\n\nField conventions: Use ISO 4217 currency codes (e.g. JPY, USD). For amount_minor, return an INTEGER in the smallest unit of the currency — yen for JPY (no decimals), cents for USD/EUR/etc — never a string. billing_cycle must be one of: weekly, monthly, quarterly, semi_annual, annual, custom. charged_at is the ISO 8601 date the charge applies to (YYYY-MM-DD).";
 
 fn extraction_schema() -> serde_json::Value {
     serde_json::json!({
@@ -62,6 +62,53 @@ fn extraction_schema() -> serde_json::Value {
     })
 }
 
+/// Drop string properties whose value is a known "I don't know" placeholder
+/// that some LLMs emit instead of honoring the omit-when-missing rule
+/// (e.g. `"<UNKNOWN>"`, `"N/A"`, `""`). Strict serde deserialization rejects
+/// these because they hit non-`String` fields like `Option<i64>`. We delete
+/// them so the property simply doesn't exist and Option fields land as None.
+///
+/// Recursive so it handles array-of-objects payloads from
+/// [`extract_many_from_text`].
+fn sanitize_llm_response(v: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    fn is_placeholder(s: &str) -> bool {
+        let lower = s.trim().to_ascii_lowercase();
+        matches!(
+            lower.as_str(),
+            "" | "<unknown>"
+                | "unknown"
+                | "n/a"
+                | "na"
+                | "?"
+                | "-"
+                | "null"
+                | "none"
+                | "undefined"
+        )
+    }
+    match v {
+        Value::Object(map) => {
+            let cleaned: serde_json::Map<String, Value> = map
+                .into_iter()
+                .filter_map(|(k, val)| {
+                    if let Value::String(ref s) = val
+                        && is_placeholder(s)
+                    {
+                        return None;
+                    }
+                    Some((k, sanitize_llm_response(val)))
+                })
+                .collect();
+            Value::Object(cleaned)
+        }
+        Value::Array(arr) => {
+            Value::Array(arr.into_iter().map(sanitize_llm_response).collect())
+        }
+        other => other,
+    }
+}
+
 /// Run the configured LLM provider against `content` and decode its structured
 /// response as a [`ParsedSubscriptionHint`].
 pub async fn extract_from_text(
@@ -74,10 +121,11 @@ pub async fn extract_from_text(
         schema: extraction_schema(),
     };
     let resp: ExtractionResponse = client.extract(req).await?;
-    serde_json::from_value(resp.data).map_err(Error::from)
+    let cleaned = sanitize_llm_response(resp.data);
+    serde_json::from_value(cleaned).map_err(Error::from)
 }
 
-const MANY_SYSTEM_PROMPT: &str = "You are reading bulk transaction data — typically a CSV export from a bank, card, or PayPal activity report; or multiple receipts concatenated together. Identify entries that look like recurring SUBSCRIPTION payments (same merchant + same amount + predictable cadence). Skip one-off purchases, transfers, refunds, and ATM withdrawals. For each subscription-like entry, extract one record using the same field conventions as for a single receipt: amount_minor in smallest units (yen for JPY, cents for USD), ISO 4217 currency, billing_cycle in {weekly, monthly, quarterly, semi_annual, annual, custom}, charged_at as YYYY-MM-DD. Return all detections as a JSON array under the key 'subscriptions'.";
+const MANY_SYSTEM_PROMPT: &str = "You are reading bulk transaction data — typically a CSV export from a bank, card, or PayPal activity report; or multiple receipts concatenated together. Identify entries that look like recurring SUBSCRIPTION payments (same merchant + same amount + predictable cadence). Skip one-off purchases, transfers, refunds, and ATM withdrawals.\n\nFor each subscription-like entry, extract one record using the same field conventions as for a single receipt: amount_minor as an integer in smallest units (yen for JPY, cents for USD), ISO 4217 currency, billing_cycle in {weekly, monthly, quarterly, semi_annual, annual, custom}, charged_at as YYYY-MM-DD. Return all detections as a JSON array under the key 'subscriptions'.\n\nCRITICAL rules for missing data: If a field on a given entry is not clearly present, OMIT THAT PROPERTY ENTIRELY from that entry. NEVER emit placeholder strings such as \"<UNKNOWN>\", \"unknown\", \"N/A\", \"null\", \"?\", \"-\", or empty strings — they break downstream type validation.";
 
 fn many_extraction_schema() -> serde_json::Value {
     serde_json::json!({
@@ -112,9 +160,78 @@ pub async fn extract_many_from_text(
         .ok_or_else(|| Error::Parser("LLM response missing 'subscriptions' array".into()))?;
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
-        if let Ok(hint) = serde_json::from_value::<ParsedSubscriptionHint>(item.clone()) {
+        let cleaned = sanitize_llm_response(item.clone());
+        if let Ok(hint) = serde_json::from_value::<ParsedSubscriptionHint>(cleaned) {
             out.push(hint);
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_drops_unknown_placeholder_strings() {
+        let input = serde_json::json!({
+            "service_name": "Netflix",
+            "amount_minor": "<UNKNOWN>",
+            "currency": "JPY",
+            "billing_cycle": "N/A",
+            "payment_method_hint": "",
+            "charged_at": "2026-05-25"
+        });
+        let out = sanitize_llm_response(input);
+        let obj = out.as_object().unwrap();
+        assert_eq!(obj.get("service_name").unwrap(), "Netflix");
+        assert!(obj.get("amount_minor").is_none());
+        assert_eq!(obj.get("currency").unwrap(), "JPY");
+        assert!(obj.get("billing_cycle").is_none());
+        assert!(obj.get("payment_method_hint").is_none());
+        assert_eq!(obj.get("charged_at").unwrap(), "2026-05-25");
+    }
+
+    #[test]
+    fn sanitize_recurses_into_arrays() {
+        let input = serde_json::json!({
+            "subscriptions": [
+                { "service_name": "A", "amount_minor": "?" },
+                { "service_name": "B", "amount_minor": 1500 }
+            ]
+        });
+        let out = sanitize_llm_response(input);
+        let arr = out.get("subscriptions").unwrap().as_array().unwrap();
+        assert!(arr[0].as_object().unwrap().get("amount_minor").is_none());
+        assert_eq!(arr[1].get("amount_minor").unwrap(), 1500);
+    }
+
+    #[test]
+    fn sanitize_keeps_real_values_untouched() {
+        let input = serde_json::json!({
+            "service_name": "Adobe Creative Cloud",
+            "amount_minor": 980,
+            "currency": "USD"
+        });
+        let out = sanitize_llm_response(input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn sanitized_payload_deserializes_into_hint() {
+        let raw = serde_json::json!({
+            "service_name": "Spotify",
+            "amount_minor": "<UNKNOWN>",
+            "currency": "USD",
+            "billing_cycle": "monthly",
+            "payment_method_hint": "N/A",
+            "charged_at": "2026-05-31"
+        });
+        let cleaned = sanitize_llm_response(raw);
+        let hint: ParsedSubscriptionHint = serde_json::from_value(cleaned).unwrap();
+        assert_eq!(hint.service_name.as_deref(), Some("Spotify"));
+        assert!(hint.amount_minor.is_none());
+        assert_eq!(hint.currency.as_deref(), Some("USD"));
+        assert!(hint.payment_method_hint.is_none());
+    }
 }

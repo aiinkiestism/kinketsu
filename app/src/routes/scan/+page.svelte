@@ -13,6 +13,10 @@
 	let saving = $state(false);
 	let savedFlash = $state(false);
 
+	let mode = $state<'single' | 'csv'>('single');
+	let csvImporting = $state(false);
+	let csvCreatedCount = $state<number | null>(null);
+
 	function fromMinor(amount_minor: number, currency: string): number {
 		return currency === 'JPY' ? amount_minor : amount_minor / 100;
 	}
@@ -85,6 +89,22 @@
 		}
 	}
 
+	async function handleCsvImport(e: SubmitEvent) {
+		e.preventDefault();
+		if (!text.trim()) return;
+		csvImporting = true;
+		error = null;
+		csvCreatedCount = null;
+		try {
+			csvCreatedCount = await invoke<number>('import_csv_text', { text });
+			text = '';
+		} catch (e) {
+			error = String(e);
+		} finally {
+			csvImporting = false;
+		}
+	}
+
 	onMount(() => llmConfig.load());
 </script>
 
@@ -100,19 +120,72 @@
 			<a href="/settings" class="link-btn">{t('scan.go_settings')}</a>
 		</article>
 	{:else}
-		<form class="glass form" onsubmit={handleScan}>
-			<textarea
-				bind:value={text}
-				rows="14"
-				placeholder={t('scan.placeholder')}
-				spellcheck="false"
-			></textarea>
-			<div class="actions">
-				<button type="submit" class="primary-btn" disabled={scanning || !text.trim()}>
-					{scanning ? t('common.loading') : t('scan.extract')}
-				</button>
-			</div>
-		</form>
+		<div class="mode-tabs">
+			<button
+				type="button"
+				class:active={mode === 'single'}
+				onclick={() => {
+					mode = 'single';
+					csvCreatedCount = null;
+					error = null;
+				}}>{t('scan.mode_single')}</button
+			>
+			<button
+				type="button"
+				class:active={mode === 'csv'}
+				onclick={() => {
+					mode = 'csv';
+					hint = null;
+					error = null;
+				}}>{t('scan.mode_csv')}</button
+			>
+		</div>
+
+		{#if mode === 'single'}
+			<form class="glass form" onsubmit={handleScan}>
+				<textarea
+					bind:value={text}
+					rows="14"
+					placeholder={t('scan.placeholder')}
+					spellcheck="false"
+				></textarea>
+				<div class="actions">
+					<button type="submit" class="primary-btn" disabled={scanning || !text.trim()}>
+						{scanning ? t('common.loading') : t('scan.extract')}
+					</button>
+				</div>
+			</form>
+		{:else}
+			<form class="glass form" onsubmit={handleCsvImport}>
+				<p class="muted desc">{t('scan.csv_description')}</p>
+				<textarea
+					bind:value={text}
+					rows="14"
+					placeholder={t('scan.csv_placeholder')}
+					spellcheck="false"
+				></textarea>
+				<div class="actions">
+					<button type="submit" class="primary-btn" disabled={csvImporting || !text.trim()}>
+						{csvImporting ? t('common.loading') : t('scan.csv_import')}
+					</button>
+				</div>
+			</form>
+
+			{#if csvCreatedCount !== null}
+				<article class="glass result">
+					<p>
+						{csvCreatedCount === 0
+							? t('scan.csv_result_zero')
+							: csvCreatedCount === 1
+								? t('scan.csv_result_one')
+								: t('scan.csv_result_other', { count: csvCreatedCount })}
+					</p>
+					<div class="actions">
+						<a href="/inbox" class="link-btn">{t('scan.csv_go_inbox')}</a>
+					</div>
+				</article>
+			{/if}
+		{/if}
 
 		{#if error}
 			<p class="error">{t('common.error')}: {error}</p>
@@ -185,6 +258,27 @@
 		flex-direction: column;
 		gap: 1rem;
 		align-items: flex-start;
+	}
+	.mode-tabs {
+		display: flex;
+		gap: 0.4rem;
+		margin-bottom: 1rem;
+	}
+	.mode-tabs button {
+		padding: 0.45rem 1rem;
+		border-radius: 999px;
+		border: 1px solid var(--kk-stroke);
+		background: var(--kk-surface-2);
+		color: var(--kk-text-muted);
+		cursor: pointer;
+		font-family: inherit;
+		font-size: 0.85rem;
+	}
+	.mode-tabs button.active {
+		background: var(--color-accent-sora);
+		color: oklch(0.15 0.05 245);
+		border-color: var(--color-accent-sora);
+		font-weight: 600;
 	}
 	.guard p {
 		margin: 0;

@@ -76,3 +76,45 @@ pub async fn extract_from_text(
     let resp: ExtractionResponse = client.extract(req).await?;
     serde_json::from_value(resp.data).map_err(Error::from)
 }
+
+const MANY_SYSTEM_PROMPT: &str = "You are reading bulk transaction data — typically a CSV export from a bank, card, or PayPal activity report; or multiple receipts concatenated together. Identify entries that look like recurring SUBSCRIPTION payments (same merchant + same amount + predictable cadence). Skip one-off purchases, transfers, refunds, and ATM withdrawals. For each subscription-like entry, extract one record using the same field conventions as for a single receipt: amount_minor in smallest units (yen for JPY, cents for USD), ISO 4217 currency, billing_cycle in {weekly, monthly, quarterly, semi_annual, annual, custom}, charged_at as YYYY-MM-DD. Return all detections as a JSON array under the key 'subscriptions'.";
+
+fn many_extraction_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "subscriptions": {
+                "type": "array",
+                "items": extraction_schema()
+            }
+        },
+        "required": ["subscriptions"]
+    })
+}
+
+/// Bulk variant of [`extract_from_text`] — sends a corpus (CSV text or
+/// concatenated receipts) and decodes the array of subscriptions the LLM
+/// identifies. Returns an empty vector if the model finds none.
+pub async fn extract_many_from_text(
+    client: &LlmClient,
+    content: String,
+) -> Result<Vec<ParsedSubscriptionHint>> {
+    let req = ExtractionRequest {
+        system_prompt: MANY_SYSTEM_PROMPT.into(),
+        user_content: content,
+        schema: many_extraction_schema(),
+    };
+    let resp = client.extract(req).await?;
+    let arr = resp
+        .data
+        .get("subscriptions")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| Error::Parser("LLM response missing 'subscriptions' array".into()))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        if let Ok(hint) = serde_json::from_value::<ParsedSubscriptionHint>(item.clone()) {
+            out.push(hint);
+        }
+    }
+    Ok(out)
+}

@@ -146,6 +146,17 @@ const EN: Record<string, string> = {
 	'settings.language_ja': '日本語',
 	'settings.language_translating': 'Translating…',
 
+	'scan.mode_single': 'Single receipt',
+	'scan.mode_csv': 'CSV import',
+	'scan.csv_description':
+		'Paste a CSV export from a bank, card, or PayPal Activity report. The configured LLM identifies recurring subscription rows and queues them in the Inbox for review.',
+	'scan.csv_placeholder': 'Paste CSV rows (or any multi-row receipt text) here…',
+	'scan.csv_import': 'Import',
+	'scan.csv_result_zero': 'Import complete — no subscription-like rows detected.',
+	'scan.csv_result_one': 'Import complete — 1 entry queued in the Inbox for review.',
+	'scan.csv_result_other': 'Import complete — {count} entries queued in the Inbox for review.',
+	'scan.csv_go_inbox': 'Open Inbox',
+
 	'scan.heading': 'Scan a receipt',
 	'scan.description':
 		'Paste a subscription confirmation or renewal email below. The LLM you picked in Settings extracts the structured fields. Use this to validate your provider before connecting Gmail.',

@@ -13,7 +13,9 @@ use kinketsu_core::models::{
     NewSubscription, PaymentMethod, Subscription,
 };
 use kinketsu_core::oauth::{self, OAuthCredentials, Tokens};
-use kinketsu_core::parsers::{self, ParsedSubscriptionHint, extract_from_text};
+use kinketsu_core::parsers::{
+    self, ParsedSubscriptionHint, extract_from_text, extract_many_from_text,
+};
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -679,6 +681,49 @@ async fn list_exchange_rates(
         .map_err(|e| e.to_string())
 }
 
+// ---- CSV bulk import ----
+
+#[tauri::command]
+#[specta::specta]
+async fn import_csv_text(state: State<'_, AppState>, text: String) -> Result<usize, String> {
+    let cfg = db::settings::get::<LlmConfig>(&state.pool, db::settings::keys::LLM_CONFIG)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no LLM provider configured".to_string())?;
+
+    let client = LlmClient::from_config(cfg);
+    let hints = extract_many_from_text(&client, text)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut created = 0usize;
+    for hint in hints {
+        let payload = serde_json::to_value(&hint).map_err(|e| e.to_string())?;
+        let summary = hint
+            .service_name
+            .clone()
+            .unwrap_or_else(|| "(unnamed)".to_string());
+        let ev = DetectionEvent {
+            id: Uuid::now_v7(),
+            source: DetectionSource::CsvImport,
+            source_ref: None,
+            raw_summary: Some(summary),
+            parsed_payload: payload,
+            confidence: 0.0,
+            status: DetectionStatus::Pending,
+            matched_subscription_id: None,
+            reviewed_at: None,
+            created_at: chrono::Utc::now(),
+        };
+        db::detection_events::insert(&state.pool, &ev)
+            .await
+            .map_err(|e| e.to_string())?;
+        created += 1;
+    }
+
+    Ok(created)
+}
+
 // ---- Detection events ----
 
 #[tauri::command]
@@ -825,6 +870,7 @@ pub fn run() {
             get_llm_config,
             set_llm_config,
             extract_subscription_from_text,
+            import_csv_text,
             list_detection_events,
             confirm_detection_event,
             confirm_detection_event_with_overrides,

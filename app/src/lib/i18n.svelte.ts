@@ -157,7 +157,8 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'inbox.sources_description':
 			'Connect external sources to start detecting subscriptions automatically.',
 		'inbox.gmail_coming_soon': 'Coming soon — Google account integration is in development.',
-		'inbox.paypal_coming_soon': 'Coming soon — PayPal subscription import is in development.',
+		'inbox.paypal_coming_soon':
+			'PayPal personal accounts cannot use the Transactions API. Connect to verify your identity, then rely on (a) Gmail parsing for PayPal email receipts and (b) PayPal Activity CSV import (coming soon).',
 		'inbox.connect_gmail': 'Connect Gmail',
 		'inbox.connect_paypal': 'Connect PayPal',
 		'inbox.range_heading': 'Scan range',
@@ -349,7 +350,8 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'inbox.sources_heading': 'ソース',
 		'inbox.sources_description': '外部ソースを接続するとサブスクの自動検出が始まります。',
 		'inbox.gmail_coming_soon': '準備中 — Google アカウント連携を実装中です。',
-		'inbox.paypal_coming_soon': '準備中 — PayPal の定期支払い取得を実装中です。',
+		'inbox.paypal_coming_soon':
+			'PayPal の個人アカウントは Transactions API を使えません。接続は本人確認用途で、サブスクの取得は (a) Gmail パース(PayPal メール明細を拾う)と (b) PayPal アクティビティ CSV インポート(準備中)に頼ります。',
 		'inbox.connect_gmail': 'Gmail に接続',
 		'inbox.connect_paypal': 'PayPal に接続',
 		'inbox.range_heading': 'スキャン範囲',

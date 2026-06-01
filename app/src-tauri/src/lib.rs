@@ -407,8 +407,12 @@ async fn start_paypal_oauth(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 async fn run_paypal_scan(state: State<'_, AppState>) -> Result<usize, String> {
-    // Token refresh is exercised here so the connection is verified as live,
-    // even though the Transaction Search API integration isn't wired yet.
+    // PayPal's Transaction Search API is business-tier only — personal
+    // accounts get a 403 regardless of OAuth scope. We still exercise token
+    // refresh here so the user can see the OAuth connection is live, then
+    // surface the recommended path: PayPal email notifications are picked
+    // up by the Gmail scanner, and the PayPal "Activity Download" CSV will
+    // import once the CSV pipeline lands.
     let creds: OAuthCredentials =
         db::settings::get(&state.pool, db::settings::keys::PAYPAL_OAUTH_CREDS)
             .await
@@ -425,7 +429,7 @@ async fn run_paypal_scan(state: State<'_, AppState>) -> Result<usize, String> {
         .await
         .map_err(|e| e.to_string())?;
 
-    Err("PayPal transaction scan is not yet wired — the Transaction Search API requires a date-range loop and per-transaction LLM extraction, both of which are scoped to a follow-up round. Token refresh succeeded, so the connection is healthy.".to_string())
+    Err("paypal_personal_no_api".to_string())
 }
 
 // ---- Renewal notifications ----

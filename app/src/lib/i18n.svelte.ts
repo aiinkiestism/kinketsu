@@ -196,6 +196,12 @@ const EN: Record<string, string> = {
 	'inbox.confirm': 'Confirm',
 	'inbox.edit_confirm': 'Edit & confirm',
 	'inbox.reject': 'Reject',
+	'inbox.bulk_select_all': 'Select all',
+	'inbox.bulk_select_row': 'Select this detection',
+	'inbox.bulk_selected': '{count} selected',
+	'inbox.bulk_reject': 'Reject selected',
+	'inbox.bulk_rejected_one': 'Rejected 1 detection.',
+	'inbox.bulk_rejected_other': 'Rejected {count} detections.',
 	'inbox.scan_run': 'Run Gmail scan',
 	'inbox.scan_run_deep': 'Deeper scan',
 	'inbox.scan_run_deep_hint':

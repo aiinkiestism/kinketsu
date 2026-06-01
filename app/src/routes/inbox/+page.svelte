@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { detectionEvents } from '$lib/stores/detection_events.svelte';
 	import { gmail } from '$lib/stores/gmail.svelte';
 	import { paypal } from '$lib/stores/paypal.svelte';
@@ -187,6 +188,29 @@
 	}
 
 	let pending = $derived(detectionEvents.items.filter((e) => e.status === 'pending'));
+	let selectedIds = $state(new SvelteSet<string>());
+	let allSelected = $derived(pending.length > 0 && pending.every((p) => selectedIds.has(p.id)));
+
+	function toggleSelected(id: string, on: boolean) {
+		if (on) selectedIds.add(id);
+		else selectedIds.delete(id);
+	}
+
+	function toggleSelectAll() {
+		if (allSelected) {
+			selectedIds.clear();
+		} else {
+			for (const p of pending) selectedIds.add(p.id);
+		}
+	}
+
+	async function handleBulkReject() {
+		const ids = Array.from(selectedIds);
+		if (ids.length === 0) return;
+		const n = await detectionEvents.bulkReject(ids);
+		selectedIds.clear();
+		if (n > 0) scanFeedback = tn('inbox.bulk_rejected', n);
+	}
 	let reviewed = $derived(
 		detectionEvents.items.filter((e) => e.status !== 'pending').slice(0, 20)
 	);
@@ -378,9 +402,35 @@
 				<p class="muted">{t('inbox.empty')}</p>
 			</article>
 		{:else}
+			<div class="bulk-bar">
+				<label class="bulk-select-all">
+					<input
+						type="checkbox"
+						checked={allSelected}
+						indeterminate={selectedIds.size > 0 && !allSelected}
+						onchange={toggleSelectAll}
+					/>
+					<span>{t('inbox.bulk_select_all')}</span>
+				</label>
+				{#if selectedIds.size > 0}
+					<span class="bulk-count muted small">
+						{t('inbox.bulk_selected', { count: selectedIds.size })}
+					</span>
+					<button type="button" class="bulk-reject" onclick={handleBulkReject}>
+						{t('inbox.bulk_reject')}
+					</button>
+				{/if}
+			</div>
 			<ul class="events">
 				{#each pending as ev (ev.id)}
 					<li class="glass event-row">
+						<input
+							type="checkbox"
+							class="row-select"
+							checked={selectedIds.has(ev.id)}
+							onchange={(e) => toggleSelected(ev.id, (e.currentTarget as HTMLInputElement).checked)}
+							aria-label={t('inbox.bulk_select_row')}
+						/>
 						<div class="event-main">
 							<div class="event-head">
 								<h3>{ev.parsed_payload.service_name ?? '—'}</h3>
@@ -653,10 +703,50 @@
 	}
 	.event-row {
 		display: grid;
-		grid-template-columns: 1fr auto;
+		grid-template-columns: auto 1fr auto;
 		gap: 1rem;
 		padding: 1rem 1.25rem;
 		border-radius: var(--kk-radius-md);
+	}
+	.row-select {
+		align-self: start;
+		margin-top: 0.25rem;
+		width: 1rem;
+		height: 1rem;
+		cursor: pointer;
+	}
+	.bulk-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.85rem;
+		flex-wrap: wrap;
+		margin-bottom: 0.75rem;
+		padding: 0.5rem 0.25rem;
+	}
+	.bulk-select-all {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.85rem;
+		color: var(--kk-text-muted);
+		cursor: pointer;
+	}
+	.bulk-count {
+		font-weight: 500;
+	}
+	.bulk-reject {
+		padding: 0.4rem 0.85rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		background: oklch(0.82 0.13 25 / 0.18);
+		color: var(--color-accent-mochi);
+		font-weight: 600;
+		font-size: 0.85rem;
+		cursor: pointer;
+		font-family: inherit;
+	}
+	.bulk-reject:hover {
+		background: oklch(0.82 0.13 25 / 0.28);
 	}
 	.event-main {
 		min-width: 0;
@@ -782,11 +872,12 @@
 			grid-template-columns: 1fr;
 		}
 		.event-row {
-			grid-template-columns: 1fr;
+			grid-template-columns: auto 1fr;
 		}
 		.event-actions {
 			flex-direction: row;
 			justify-self: start;
+			grid-column: 1 / -1;
 		}
 	}
 </style>

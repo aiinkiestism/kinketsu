@@ -52,6 +52,17 @@ class DetectionEventsStore {
 			this.error = String(e);
 		}
 	}
+
+	async bulkReject(ids: string[]): Promise<number> {
+		try {
+			const n = await invoke<number>('bulk_reject_detection_events', { ids });
+			await this.load();
+			return n;
+		} catch (e) {
+			this.error = String(e);
+			return 0;
+		}
+	}
 }
 
 export const detectionEvents = new DetectionEventsStore();

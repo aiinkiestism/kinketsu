@@ -1231,6 +1231,41 @@ async fn reject_detection_event(state: State<'_, AppState>, id: Uuid) -> Result<
     Ok(())
 }
 
+/// Reject a batch of pending detection events in one round-trip. Each id is
+/// processed independently — same as calling `reject_detection_event` per id,
+/// including sender → blocklist learning. Returns the count actually rejected.
+#[tauri::command]
+#[specta::specta]
+async fn bulk_reject_detection_events(
+    state: State<'_, AppState>,
+    ids: Vec<Uuid>,
+) -> Result<usize, String> {
+    let mut rejected = 0usize;
+    for id in ids {
+        let ev = match db::detection_events::get(&state.pool, id).await {
+            Ok(Some(e)) => Some(e),
+            Ok(None) => None,
+            Err(e) => {
+                log::warn!("bulk reject: get({id}) failed: {e}");
+                continue;
+            }
+        };
+        if let Err(e) =
+            db::detection_events::update_status(&state.pool, id, DetectionStatus::Rejected, None)
+                .await
+        {
+            log::warn!("bulk reject: update_status({id}) failed: {e}");
+            continue;
+        }
+        if let Some(sender) = ev.and_then(|e| e.sender) {
+            let _ =
+                db::learned_senders::upsert(&state.pool, &sender, LearnedDecision::Block).await;
+        }
+        rejected += 1;
+    }
+    Ok(rejected)
+}
+
 // ---- Learned senders ----
 
 #[tauri::command]
@@ -1299,6 +1334,7 @@ pub fn run() {
             confirm_detection_event,
             confirm_detection_event_with_overrides,
             reject_detection_event,
+            bulk_reject_detection_events,
             list_learned_senders,
             delete_learned_sender,
             refresh_exchange_rates,

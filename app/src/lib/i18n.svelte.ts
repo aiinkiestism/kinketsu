@@ -68,6 +68,11 @@ const EN: Record<string, string> = {
 	'common.loading': 'Loading…',
 	'common.show': 'Show',
 	'common.hide': 'Hide',
+	'common.close': 'Close',
+	'common.show_details': 'Show technical details',
+	'common.hide_details': 'Hide technical details',
+	'common.copy': 'Copy',
+	'common.copied': 'Copied',
 
 	'cycle.weekly': 'Weekly',
 	'cycle.monthly': 'Monthly',
@@ -201,6 +206,15 @@ const EN: Record<string, string> = {
 	'inbox.scan_needs_connection': 'Connect Gmail first.',
 	'inbox.scan_needs_llm': 'Configure an LLM provider in Settings first.',
 	'inbox.scan_cancelled': 'Scan cancelled.',
+
+	'inbox.error_gmail_disabled_title': 'Gmail API is not enabled in your Google Cloud project',
+	'inbox.error_gmail_disabled_msg':
+		'kinketsu can’t list messages because the Gmail API is disabled. Open the Google Cloud Console, click Enable on the Gmail API page, wait 1–2 minutes for it to propagate, then run the scan again.',
+	'inbox.error_open_google_console': 'Open Google Cloud Console',
+	'inbox.error_oauth_blocked_title': 'Google blocked the OAuth flow',
+	'inbox.error_oauth_blocked_msg':
+		'Your Google account isn’t on this OAuth client’s test-user list (or the consent screen isn’t configured). Open the consent screen, add your email under Test users, then try Connect Gmail again.',
+	'inbox.error_open_consent_screen': 'Open OAuth consent screen',
 	'inbox.connect_gmail_loading': 'Opening browser…',
 	'inbox.gmail_connected': 'Gmail connected',
 	'inbox.gmail_disconnect': 'Disconnect',

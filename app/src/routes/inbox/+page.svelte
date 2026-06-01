@@ -6,6 +6,7 @@
 	import { llmConfig } from '$lib/stores/llm_config.svelte';
 	import { i18n, t, tn } from '$lib/i18n.svelte';
 	import MonthRangeSelect from '$lib/components/MonthRangeSelect.svelte';
+	import ErrorDialog from '$lib/components/ErrorDialog.svelte';
 	import {
 		CURRENCIES,
 		type BillingCycle,
@@ -13,6 +14,51 @@
 		type DetectionSource,
 		type YearMonth
 	} from '$lib/types';
+
+	type ScanErrorInfo = {
+		title: string;
+		message: string;
+		details: string;
+		actionUrl?: string;
+		actionLabel?: string;
+	};
+
+	let errorDialogOpen = $state(false);
+	let errorDialog = $state<ScanErrorInfo>({ title: '', message: '', details: '' });
+
+	function openErrorDialog(info: ScanErrorInfo) {
+		errorDialog = info;
+		errorDialogOpen = true;
+	}
+
+	function parseScanError(raw: string): ScanErrorInfo {
+		if (raw.includes('Gmail API has not been used') || raw.includes('SERVICE_DISABLED')) {
+			const m = raw.match(
+				/https:\/\/console\.developers\.google\.com\/apis\/api\/gmail\.googleapis\.com\/overview\?project=\d+/
+			);
+			return {
+				title: t('inbox.error_gmail_disabled_title'),
+				message: t('inbox.error_gmail_disabled_msg'),
+				details: raw,
+				actionUrl: m?.[0] ?? 'https://console.cloud.google.com/apis/library/gmail.googleapis.com',
+				actionLabel: t('inbox.error_open_google_console')
+			};
+		}
+		if (raw.includes('access_denied') || raw.includes('Access blocked')) {
+			return {
+				title: t('inbox.error_oauth_blocked_title'),
+				message: t('inbox.error_oauth_blocked_msg'),
+				details: raw,
+				actionUrl: 'https://console.cloud.google.com/apis/credentials/consent',
+				actionLabel: t('inbox.error_open_consent_screen')
+			};
+		}
+		return {
+			title: t('common.error'),
+			message: raw.length > 240 ? raw.slice(0, 240) + '…' : raw,
+			details: raw
+		};
+	}
 
 	let editingEvent = $state<DetectionEvent | null>(null);
 	let editName = $state('');
@@ -76,17 +122,11 @@
 		try {
 			await gmail.connect();
 		} catch {
-			/* error in store */
+			const raw = gmail.error ?? '';
+			if (raw && !raw.includes('oauth cancelled')) {
+				openErrorDialog(parseScanError(raw));
+			}
 		}
-	}
-
-	function describeScanError(raw: string): string {
-		if (raw.includes('no LLM provider configured')) return t('inbox.scan_needs_llm');
-		if (raw.includes('Gmail not connected')) return t('inbox.scan_needs_connection');
-		if (raw.includes('Gmail OAuth credentials not configured'))
-			return t('inbox.scan_needs_creds');
-		if (raw.includes('scan cancelled')) return t('inbox.scan_cancelled');
-		return `${t('common.error')}: ${raw}`;
 	}
 
 	async function handleRunScan() {
@@ -116,7 +156,19 @@
 			}
 			await detectionEvents.load();
 		} catch (e) {
-			scanFeedback = describeScanError(gmail.error ?? String(e));
+			const raw = gmail.error ?? String(e);
+			// Short, friendly errors stay inline; everything else gets the modal.
+			if (raw.includes('scan cancelled')) {
+				scanFeedback = t('inbox.scan_cancelled');
+			} else if (raw.includes('no LLM provider configured')) {
+				scanFeedback = t('inbox.scan_needs_llm');
+			} else if (raw.includes('Gmail not connected')) {
+				scanFeedback = t('inbox.scan_needs_connection');
+			} else if (raw.includes('Gmail OAuth credentials not configured')) {
+				scanFeedback = t('inbox.scan_needs_creds');
+			} else {
+				openErrorDialog(parseScanError(raw));
+			}
 		}
 	}
 
@@ -161,7 +213,10 @@
 		try {
 			await paypal.connect();
 		} catch {
-			/* error in store */
+			const raw = paypal.error ?? '';
+			if (raw && !raw.includes('oauth cancelled')) {
+				openErrorDialog(parseScanError(raw));
+			}
 		}
 	}
 
@@ -242,9 +297,6 @@
 				{/if}
 			</article>
 		</div>
-		{#if gmail.error}
-			<p class="error">{t('common.error')}: {gmail.error}</p>
-		{/if}
 	</section>
 
 	<section class="glass section">
@@ -390,6 +442,15 @@
 			<p class="error">{t('common.error')}: {detectionEvents.error}</p>
 		{/if}
 	</section>
+
+	<ErrorDialog
+		bind:open={errorDialogOpen}
+		title={errorDialog.title}
+		message={errorDialog.message}
+		details={errorDialog.details}
+		actionLabel={errorDialog.actionLabel ?? null}
+		actionUrl={errorDialog.actionUrl ?? null}
+	/>
 </div>
 
 <style>

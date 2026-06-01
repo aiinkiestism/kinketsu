@@ -438,6 +438,14 @@ async fn cancel_scan(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Open the URL in the user's default browser (used by the error-dialog
+/// action buttons that link to Google Cloud Console etc.).
+#[tauri::command]
+#[specta::specta]
+fn open_url(url: String) -> Result<(), String> {
+    webbrowser::open(&url).map_err(|e| format!("failed to open url: {e}"))
+}
+
 // ---- PayPal OAuth ----
 
 #[tauri::command]
@@ -978,6 +986,7 @@ pub fn run() {
             disconnect_gmail,
             cancel_oauth,
             cancel_scan,
+            open_url,
             start_gmail_oauth,
             run_gmail_scan,
             save_paypal_oauth_credentials,

@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex as StdMutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use tokio::sync::oneshot;
 
@@ -31,6 +33,10 @@ pub struct AppState {
     /// Connect button is always responsive even if the previous attempt
     /// silently failed (e.g. user closed the browser tab).
     pub oauth_cancel: StdMutex<Option<oneshot::Sender<()>>>,
+    /// Cooperative cancellation flag for an in-flight scan loop. The scan
+    /// checks this at every iteration so the UI's Cancel button can bail
+    /// out without waiting for the next LLM round-trip to finish.
+    pub scan_cancel: Arc<AtomicBool>,
 }
 
 fn arm_oauth_cancel(state: &AppState) -> oneshot::Receiver<()> {
@@ -338,28 +344,55 @@ async fn run_gmail_scan(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Reset cancel flag at the start of every scan.
+    state.scan_cancel.store(false, Ordering::Relaxed);
+
     let mut created = 0usize;
+    let mut skipped_seen = 0usize;
+    let mut skipped_fetch = 0usize;
+    let mut skipped_body = 0usize;
+    let mut skipped_extract = 0usize;
     for id in &msg_ids {
+        if state.scan_cancel.load(Ordering::Relaxed) {
+            log::info!(
+                "gmail scan cancelled: created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract}"
+            );
+            return Err("scan cancelled".to_string());
+        }
+
         if db::detection_events::find_by_source_ref(&state.pool, DetectionSource::Gmail, id)
             .await
             .map_err(|e| e.to_string())?
             .is_some()
         {
+            skipped_seen += 1;
             continue;
         }
 
         let msg = match parsers::gmail::fetch_message(&access_token, id).await {
             Ok(m) => m,
-            Err(_) => continue,
+            Err(e) => {
+                log::warn!("gmail scan: fetch_message({id}) failed: {e}");
+                skipped_fetch += 1;
+                continue;
+            }
         };
         let body = match parsers::gmail::extract_text_body(&msg) {
             Some(b) => b,
-            None => continue,
+            None => {
+                log::warn!("gmail scan: no text body in message {id}");
+                skipped_body += 1;
+                continue;
+            }
         };
 
         let hint = match extract_from_text(&llm, body).await {
             Ok(h) => h,
-            Err(_) => continue,
+            Err(e) => {
+                log::warn!("gmail scan: LLM extract for {id} failed: {e}");
+                skipped_extract += 1;
+                continue;
+            }
         };
 
         let msg_ref = parsers::gmail::message_ref_from(&msg, id);
@@ -389,7 +422,20 @@ async fn run_gmail_scan(
         created += 1;
     }
 
+    log::info!(
+        "gmail scan done: matched={} created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract}",
+        msg_ids.len()
+    );
     Ok(created)
+}
+
+/// Cooperatively cancel an in-flight `run_gmail_scan` loop. The loop checks
+/// the flag between messages and bails out with `scan cancelled`.
+#[tauri::command]
+#[specta::specta]
+async fn cancel_scan(state: State<'_, AppState>) -> Result<(), String> {
+    state.scan_cancel.store(true, Ordering::Relaxed);
+    Ok(())
 }
 
 // ---- PayPal OAuth ----
@@ -931,6 +977,7 @@ pub fn run() {
             has_gmail_tokens,
             disconnect_gmail,
             cancel_oauth,
+            cancel_scan,
             start_gmail_oauth,
             run_gmail_scan,
             save_paypal_oauth_credentials,
@@ -989,6 +1036,7 @@ pub fn run() {
             app.manage(AppState {
                 pool,
                 oauth_cancel: StdMutex::new(None),
+                scan_cancel: Arc::new(AtomicBool::new(false)),
             });
             Ok(())
         })

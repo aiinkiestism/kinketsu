@@ -64,6 +64,14 @@ class GmailStore {
 		}
 	}
 
+	async cancelScan() {
+		try {
+			await invoke('cancel_scan');
+		} catch (e) {
+			this.error = String(e);
+		}
+	}
+
 	async disconnect() {
 		this.error = null;
 		try {

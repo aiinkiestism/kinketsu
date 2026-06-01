@@ -200,6 +200,7 @@ const EN: Record<string, string> = {
 	'inbox.scan_needs_creds': 'Save Gmail credentials in Settings first.',
 	'inbox.scan_needs_connection': 'Connect Gmail first.',
 	'inbox.scan_needs_llm': 'Configure an LLM provider in Settings first.',
+	'inbox.scan_cancelled': 'Scan cancelled.',
 	'inbox.connect_gmail_loading': 'Opening browser…',
 	'inbox.gmail_connected': 'Gmail connected',
 	'inbox.gmail_disconnect': 'Disconnect',

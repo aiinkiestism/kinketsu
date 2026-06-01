@@ -3,6 +3,7 @@
 	import { detectionEvents } from '$lib/stores/detection_events.svelte';
 	import { gmail } from '$lib/stores/gmail.svelte';
 	import { paypal } from '$lib/stores/paypal.svelte';
+	import { llmConfig } from '$lib/stores/llm_config.svelte';
 	import { i18n, t, tn } from '$lib/i18n.svelte';
 	import MonthRangeSelect from '$lib/components/MonthRangeSelect.svelte';
 	import {
@@ -79,6 +80,15 @@
 		}
 	}
 
+	function describeScanError(raw: string): string {
+		if (raw.includes('no LLM provider configured')) return t('inbox.scan_needs_llm');
+		if (raw.includes('Gmail not connected')) return t('inbox.scan_needs_connection');
+		if (raw.includes('Gmail OAuth credentials not configured'))
+			return t('inbox.scan_needs_creds');
+		if (raw.includes('scan cancelled')) return t('inbox.scan_cancelled');
+		return `${t('common.error')}: ${raw}`;
+	}
+
 	async function handleRunScan() {
 		scanFeedback = null;
 		if (!gmail.credentials) {
@@ -87,6 +97,10 @@
 		}
 		if (!gmail.connected) {
 			scanFeedback = t('inbox.scan_needs_connection');
+			return;
+		}
+		if (!llmConfig.current) {
+			scanFeedback = t('inbox.scan_needs_llm');
 			return;
 		}
 		if (scanRange.length === 0) {
@@ -101,9 +115,13 @@
 				scanFeedback = tn('inbox.scan_complete', created);
 			}
 			await detectionEvents.load();
-		} catch {
-			/* error in store */
+		} catch (e) {
+			scanFeedback = describeScanError(gmail.error ?? String(e));
 		}
+	}
+
+	async function handleCancelScan() {
+		await gmail.cancelScan();
 	}
 
 	let pending = $derived(detectionEvents.items.filter((e) => e.status === 'pending'));
@@ -151,6 +169,7 @@
 		detectionEvents.load();
 		gmail.load();
 		paypal.load();
+		llmConfig.load();
 	});
 </script>
 
@@ -233,14 +252,23 @@
 		<p class="muted desc-small">{t('inbox.range_description')}</p>
 		<MonthRangeSelect bind:value={scanRange} />
 		<div class="scan-actions">
-			<button
-				type="button"
-				class="scan-btn"
-				onclick={handleRunScan}
-				disabled={gmail.scanning || scanRange.length === 0}
-			>
-				{gmail.scanning ? t('inbox.scan_running') : t('inbox.scan_run')}
-			</button>
+			{#if gmail.scanning}
+				<button type="button" class="scan-btn running" disabled>
+					{t('inbox.scan_running')}
+				</button>
+				<button type="button" class="scan-cancel" onclick={handleCancelScan}>
+					{t('subs.cancel')}
+				</button>
+			{:else}
+				<button
+					type="button"
+					class="scan-btn"
+					onclick={handleRunScan}
+					disabled={scanRange.length === 0}
+				>
+					{t('inbox.scan_run')}
+				</button>
+			{/if}
 			{#if scanFeedback}
 				<span class="scan-feedback">{scanFeedback}</span>
 			{/if}
@@ -460,6 +488,21 @@
 	.scan-btn:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+	.scan-btn.running {
+		opacity: 0.8;
+	}
+	.scan-cancel {
+		padding: 0.6rem 1rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		background: transparent;
+		color: var(--kk-text-muted);
+		cursor: pointer;
+		font-family: inherit;
+	}
+	.scan-cancel:hover {
+		color: var(--kk-text-primary);
 	}
 	.scan-feedback {
 		font-size: 0.9rem;

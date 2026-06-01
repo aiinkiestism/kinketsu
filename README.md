@@ -13,14 +13,6 @@ Today's options force a trade-off:
 
 **kinketsu treats your email inbox as the universal subscription registry.** Netflix, Adobe, OpenAI, Spotify, GitHub, U-NEXT, d Magazine, Nikkei — virtually every subscription sends confirmation and renewal emails. A user-selected LLM (Claude / OpenAI / Gemini / Ollama / LM Studio) reads them and proposes subscription entries; you confirm or reject in a review queue. No bank API, no electronic-settlement-agent license, no recurring vendor lock-in.
 
-## Status
-
-v0.1 feature-complete plus a polish + infrastructure pass. All Rust crates
-type-check and pass clippy + tests; the SvelteKit frontend type-checks and
-builds. A live `pnpm tauri dev` run, a `pnpm tauri build` release bundle,
-and `pnpm android:init` are the remaining manual smoke checks (each
-requires local OS / SDK state outside of CI's reach).
-
 ## Architecture
 
 ```
@@ -47,35 +39,46 @@ kinketsu/
 | Web | SvelteKit + Tailwind 4 | Shared Svelte codebase across all shells; static SPA build |
 | Design | Glassmorphism on animated blob background | visionOS / iOS 18 era; subtle palette in `oklch()` |
 
-## v0.1 scope
+## Features
 
-- [x] Workspace + UI shell scaffolding
-- [x] Manual subscription CRUD
-- [x] Categories + payment methods
-- [x] Settings: LLM provider selection + API keys (Claude / OpenAI / Gemini / Ollama / LM Studio)
-- [x] Multi-currency with daily exchange-rate cache (open.er-api.com, JPY-anchored conversion)
-- [x] iCalendar (`.ics`) export of renewal dates
-- [x] Renewal reminder notifications (system, 7-day window, daily background check)
-- [x] Past-scan UI: year / month multi-select (`MonthRangeSelect`) driving Gmail scans
-- [x] Inbox / review queue for detected subscriptions (Confirm / Reject)
-- [x] Gmail OAuth + LLM-based receipt extraction (real Gmail API, paginated, dedupe)
-- [x] PayPal OAuth flow (Log In with PayPal); personal-account scan via Gmail-parsed PayPal emails + CSV import (PayPal Transaction Search API is business-tier only)
-- [x] Inline editing for subscriptions, payment methods, categories
-- [x] Edit-before-confirm on detection events
-- [x] Base currency derived from locale, overridable in Settings
-- [x] Manual locale switcher in Settings; secret-input show/hide toggles; `MonthRangeSelect` presets
-- [x] CSV bulk import (paste text → LLM identifies recurring rows → DetectionEvent queue)
-- [x] `specta` + `tauri-specta` typed bindings exported on `pnpm tauri dev`
-- [x] LLM-driven runtime translation (no shipped JA dictionary)
-- [x] Single-user HTTP server with Bearer-token auth + Dockerfile
-- [x] cargo test suite (15 unit + 8 integration) + GitHub Actions CI
+### Subscription management
+- Manual CRUD for subscriptions, with inline editing
+- Categories and payment methods
+- Multi-currency with a daily exchange-rate cache (open.er-api.com, JPY-anchored)
+- Base currency derived from locale, overridable in Settings
+- iCalendar (`.ics`) export of renewal dates
+- Renewal reminder system notifications (7-day window, daily background check)
 
-## Out of scope (deliberately)
+### Discovery
+- Gmail OAuth + LLM-based receipt extraction (paginated, dedupe, cancel-aware)
+- Two-stage Gmail scan — tight default scan, opt-in deeper scan with a multi-month recurrence filter
+- LLM `is_subscription` gate drops bank-side notifications, one-off purchases, and promo mail before they enter the inbox
+- Sender learning: rejecting a detection adds the sender to a blocklist (skipped on next scan, before paying for an LLM call); confirming adds it to an allowlist
+- Inbox / review queue with single + bulk Reject, edit-before-confirm
+- CSV bulk import (paste text → LLM identifies recurring rows → review queue)
+- PayPal: OAuth (Log In with PayPal); personal accounts use Gmail-parsed PayPal receipts and CSV import (PayPal Transaction Search API is business-tier only)
+- Past-scan UI: year / month multi-select with presets
+
+### Privacy
+- PII scrubbing of email bodies before any remote LLM round-trip — emails, phones, postal codes, IBANs, and Luhn-valid card numbers are replaced with deterministic placeholders (`<EMAIL_n>`, `<CARD_n>`, …) so the model never sees them
+- Pick Ollama or LM Studio in Settings to keep the body entirely local
+
+### Settings + UX
+- LLM provider selection: Claude / OpenAI / Gemini / Ollama / LM Studio, with API keys / endpoints in Settings
+- Manual locale switcher; secret-input show / hide toggles
+- LLM-driven runtime UI translation (no shipped JA dictionary), cached per locale; renewal notifications honour the same cache
+
+### Platforms
+- Tauri 2 shell — macOS desktop and Android
+- Single-user HTTP server with Bearer-token auth + Dockerfile (`kinketsu-server`)
+- Typed bindings (`specta` + `tauri-specta`) regenerated on every `pnpm tauri dev` debug run
+
+### Not in scope
 
 - **Bank / credit-card aggregation** — requires Japan's electronic settlement agent license (*denshi kessai-tō dairi-gyō*); non-starter for an individual project.
 - **Crypto wallet address monitoring** — a different problem domain (on-chain flows are not subscriptions).
 - **App Store / Play Store subscription sync** — no usable public API for third-party purchases.
-- **PayPal Transaction Search API for personal accounts** — PayPal restricts that API to business-tier accounts. Personal users rely on Gmail-parsed PayPal email receipts and the CSV bulk import on the Scan page.
+- **PayPal Transaction Search API for personal accounts** — PayPal restricts that API to business-tier accounts. Personal users rely on Gmail-parsed PayPal receipts and the CSV bulk import on the Scan page.
 
 ## Quick start
 
@@ -168,7 +171,7 @@ pnpm build                # full Tauri release bundle
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --exclude kinketsu-app --all-targets -- -D warnings
-cargo test -p kinketsu-core --all-targets   # 15 unit + 8 integration
+cargo test -p kinketsu-core --all-targets
 ```
 
 CI (`.github/workflows/ci.yml`) runs the Rust gate (fmt + clippy + test,
@@ -196,11 +199,19 @@ bare ASCII string.
 kinketsu never stores email bodies. The Gmail integration fetches receipts,
 extracts structured fields via the user-configured LLM, and persists only
 the parsed result plus the upstream `message-id` (used to skip
-already-seen messages). The LLM-driven UI translation sends each dictionary
-key exactly once per locale and caches the result; pick Ollama or LM Studio
-if even that traffic should stay on your machine. CSV bulk imports send the
-text you paste to the configured LLM in a single round-trip — same
-provider, same privacy posture.
+already-seen messages).
+
+Before any remote LLM round-trip, the body is passed through a PII scrubber
+(`crates/core/src/parsers/redact.rs`). Email addresses, phone numbers,
+postal codes, IBANs, and Luhn-valid card PANs are replaced with placeholders
+like `<EMAIL_1>` and `<CARD_1>` — the model only ever sees what it needs
+(merchant, amount, currency, cycle, dates). The regex layer does not catch
+personal names or freeform addresses; if you need stronger guarantees, pick
+Ollama or LM Studio in Settings and the body never leaves the machine.
+
+The LLM-driven UI translation sends each dictionary key exactly once per
+locale and caches the result. CSV bulk imports send the text you paste to
+the configured LLM in a single round-trip — same provider, same scrubbing.
 
 ## License
 

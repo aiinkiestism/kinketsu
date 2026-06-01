@@ -103,11 +103,33 @@ pnpm android:build
 
 ### Run the standalone server (self-host target)
 
+The server is single-user. All mutating routes sit behind a Bearer token —
+the value of `KINKETSU_SECRET` — passed as `Authorization: Bearer <secret>`.
+
 ```sh
+export KINKETSU_SECRET=$(openssl rand -hex 32)
+export KINKETSU_DB=./kinketsu.db
 cargo run -p kinketsu-server
 # Listens on $KINKETSU_BIND (default 0.0.0.0:3000)
-#   GET /health → {"status":"ok","service":"kinketsu-server"}
+#   GET /health → {"status":"ok","service":"kinketsu-server"}  (no auth)
+#   GET /subscriptions  (auth required)
+#   POST /scan/text  (auth required)
+#   …etc
 ```
+
+#### Docker
+
+```sh
+docker build -t kinketsu-server .
+docker run --rm \
+  -e KINKETSU_SECRET=$(openssl rand -hex 32) \
+  -p 3000:3000 \
+  -v $(pwd)/data:/data \
+  kinketsu-server
+```
+
+Mount `/data` to persist `kinketsu.db`. Put the API behind a reverse proxy
+(Caddy / nginx / Traefik) for TLS.
 
 ### Frontend-only dev (browser, no Tauri shell)
 

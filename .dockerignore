@@ -1,0 +1,15 @@
+target
+node_modules
+app/node_modules
+app/build
+app/.svelte-kit
+app/src-tauri/target
+app/src-tauri/gen
+.git
+.github
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+.env
+.env.*

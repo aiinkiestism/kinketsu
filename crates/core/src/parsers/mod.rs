@@ -27,12 +27,16 @@ pub struct ParsedSubscriptionHint {
     pub charged_at: Option<NaiveDate>,
 }
 
-const SYSTEM_PROMPT: &str = "You are a structured-data extractor. Read the user-provided text (typically a subscription confirmation or renewal email) and extract the subscription fields.\n\nCRITICAL rules for missing data: If a field is not clearly present in the text, OMIT THE PROPERTY ENTIRELY from your output. Do NOT emit placeholder strings such as \"<UNKNOWN>\", \"unknown\", \"N/A\", \"null\", \"?\", \"-\", or empty strings — they break downstream type validation. Only emit a property when you have a real value for it.\n\nField conventions: Use ISO 4217 currency codes (e.g. JPY, USD). For amount_minor, return an INTEGER in the smallest unit of the currency — yen for JPY (no decimals), cents for USD/EUR/etc — never a string. billing_cycle must be one of: weekly, monthly, quarterly, semi_annual, annual, custom. charged_at is the ISO 8601 date the charge applies to (YYYY-MM-DD).";
+const SYSTEM_PROMPT: &str = "You are evaluating an email to decide whether it represents a real recurring subscription, then extracting structured fields only if it is.\n\nFirst set `is_subscription`:\n- TRUE only when the email is a direct billing or renewal notification from the merchant itself for a recurring service (Netflix renewal, Spotify monthly charge, Adobe invoice, GitHub Pro receipt, Canva invoice, U-NEXT / dマガジン / 日経電子版 / 月額 or 年額 plans, etc.).\n- FALSE for any of: one-off purchases (Starbucks coffee, Uber Eats meals, single retail/EC orders, single in-app purchases that are not labeled as recurring), promotional emails / newsletters / job-board digests, generic transactional confirmations that aren't recurring (shipping notifications, password resets), and *critically* BANK or CARD ISSUER notifications about a third-party charge (e.g. \"ソニー銀行 WALLET ご利用のお知らせ\", \"Visa was used at SPOTIFY\", \"Your card was charged ¥980 at MERCHANT\"). The bank notification is not itself the subscription — the user tracks the merchant's own renewal email separately.\n\nWhen `is_subscription` is FALSE, return ONLY { \"is_subscription\": false } — omit every other field. Downstream code will skip the entry.\n\nWhen `is_subscription` is TRUE, also fill the structured fields below.\n\nField conventions: Use ISO 4217 currency codes (e.g. JPY, USD). For `amount_minor`, return an INTEGER in the smallest unit of the currency — yen for JPY (no decimals), cents for USD/EUR/etc — never a string. `billing_cycle` must be one of: weekly, monthly, quarterly, semi_annual, annual, custom. `charged_at` is the ISO 8601 date the charge applies to (YYYY-MM-DD).\n\nCRITICAL rules for missing data: If any field other than `is_subscription` is not clearly present in the text, OMIT THE PROPERTY ENTIRELY. Do NOT emit placeholder strings such as \"<UNKNOWN>\", \"unknown\", \"N/A\", \"null\", \"?\", \"-\", or empty strings — they break downstream type validation.";
 
 fn extraction_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
         "properties": {
+            "is_subscription": {
+                "type": "boolean",
+                "description": "True only for direct recurring-subscription charges from the merchant itself. False for one-off purchases, newsletters/promos, and bank/card notifications about a third-party charge."
+            },
             "service_name": {
                 "type": "string",
                 "description": "Human-readable name of the service (e.g. \"Netflix\")."
@@ -58,7 +62,8 @@ fn extraction_schema() -> serde_json::Value {
                 "format": "date",
                 "description": "ISO 8601 date the charge applies to (YYYY-MM-DD)."
             }
-        }
+        },
+        "required": ["is_subscription"]
     })
 }
 
@@ -109,12 +114,15 @@ fn sanitize_llm_response(v: serde_json::Value) -> serde_json::Value {
     }
 }
 
-/// Run the configured LLM provider against `content` and decode its structured
-/// response as a [`ParsedSubscriptionHint`].
+/// Run the configured LLM provider against `content`. Returns `Ok(None)` when
+/// the LLM classifies the email as *not* a recurring subscription (single-shot
+/// receipts, promo mail, bank-side notifications, etc.); returns
+/// `Ok(Some(hint))` when it does classify as a subscription and the fields
+/// deserialize cleanly.
 pub async fn extract_from_text(
     client: &LlmClient,
     content: String,
-) -> Result<ParsedSubscriptionHint> {
+) -> Result<Option<ParsedSubscriptionHint>> {
     let req = ExtractionRequest {
         system_prompt: SYSTEM_PROMPT.into(),
         user_content: content,
@@ -122,7 +130,17 @@ pub async fn extract_from_text(
     };
     let resp: ExtractionResponse = client.extract(req).await?;
     let cleaned = sanitize_llm_response(resp.data);
-    serde_json::from_value(cleaned).map_err(Error::from)
+
+    let is_sub = cleaned
+        .get("is_subscription")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !is_sub {
+        return Ok(None);
+    }
+
+    let hint: ParsedSubscriptionHint = serde_json::from_value(cleaned).map_err(Error::from)?;
+    Ok(Some(hint))
 }
 
 const MANY_SYSTEM_PROMPT: &str = "You are reading bulk transaction data — typically a CSV export from a bank, card, or PayPal activity report; or multiple receipts concatenated together. Identify entries that look like recurring SUBSCRIPTION payments (same merchant + same amount + predictable cadence). Skip one-off purchases, transfers, refunds, and ATM withdrawals.\n\nFor each subscription-like entry, extract one record using the same field conventions as for a single receipt: amount_minor as an integer in smallest units (yen for JPY, cents for USD), ISO 4217 currency, billing_cycle in {weekly, monthly, quarterly, semi_annual, annual, custom}, charged_at as YYYY-MM-DD. Return all detections as a JSON array under the key 'subscriptions'.\n\nCRITICAL rules for missing data: If a field on a given entry is not clearly present, OMIT THAT PROPERTY ENTIRELY from that entry. NEVER emit placeholder strings such as \"<UNKNOWN>\", \"unknown\", \"N/A\", \"null\", \"?\", \"-\", or empty strings — they break downstream type validation.";
@@ -161,6 +179,15 @@ pub async fn extract_many_from_text(
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
         let cleaned = sanitize_llm_response(item.clone());
+        // Honour the is_subscription gate when present; bulk mode also drops
+        // anything the LLM marked false.
+        if cleaned
+            .get("is_subscription")
+            .and_then(|v| v.as_bool())
+            == Some(false)
+        {
+            continue;
+        }
         if let Ok(hint) = serde_json::from_value::<ParsedSubscriptionHint>(cleaned) {
             out.push(hint);
         }
@@ -220,6 +247,7 @@ mod tests {
     #[test]
     fn sanitized_payload_deserializes_into_hint() {
         let raw = serde_json::json!({
+            "is_subscription": true,
             "service_name": "Spotify",
             "amount_minor": "<UNKNOWN>",
             "currency": "USD",

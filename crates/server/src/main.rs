@@ -404,9 +404,12 @@ async fn scan_text(
         .map_err(err)?
         .ok_or_else(|| bad_request("no LLM provider configured"))?;
     let client = LlmClient::from_config(cfg);
-    Ok(Json(
-        extract_from_text(&client, req.text).await.map_err(err)?,
-    ))
+    match extract_from_text(&client, req.text).await.map_err(err)? {
+        Some(hint) => Ok(Json(hint)),
+        None => Err(bad_request(
+            "LLM classified this text as not a recurring subscription",
+        )),
+    }
 }
 
 async fn scan_csv(

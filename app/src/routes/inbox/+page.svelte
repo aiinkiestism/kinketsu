@@ -306,7 +306,15 @@
 		<div class="scan-actions">
 			{#if gmail.scanning}
 				<button type="button" class="scan-btn running" disabled>
-					{t('inbox.scan_running')}
+					{#if gmail.progress}
+						{t('inbox.scan_progress', {
+							processed: gmail.progress.processed,
+							total: gmail.progress.total,
+							created: gmail.progress.created
+						})}
+					{:else}
+						{t('inbox.scan_running')}
+					{/if}
 				</button>
 				<button type="button" class="scan-cancel" onclick={handleCancelScan}>
 					{t('subs.cancel')}
@@ -325,6 +333,14 @@
 				<span class="scan-feedback">{scanFeedback}</span>
 			{/if}
 		</div>
+		{#if gmail.scanning && gmail.progress}
+			<p class="scan-detail muted small">
+				{t('inbox.scan_progress_detail', {
+					classified: gmail.progress.skippedClassified,
+					seen: gmail.progress.skippedSeen
+				})}
+			</p>
+		{/if}
 	</section>
 
 	<section class="list-section">
@@ -568,6 +584,9 @@
 	.scan-feedback {
 		font-size: 0.9rem;
 		color: var(--kk-text-muted);
+	}
+	.scan-detail {
+		margin: 0.5rem 0 0;
 	}
 
 	.list-section {

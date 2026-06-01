@@ -11,8 +11,27 @@ use crate::llm::LlmClient;
 use crate::{Error, Result};
 
 const API_BASE: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
-const SEARCH_KEYWORDS: &str = "(invoice OR receipt OR subscription OR \"recurring payment\" OR renewal OR \"請求\" OR \"明細\" OR \"領収\")";
+
+/// Stage 1 (default) — high precision query. Only subscription-specific
+/// vocabulary so one-off Starbucks / Uber Eats / retail receipts don't enter
+/// the LLM pipeline at all.
+pub const TIGHT_KEYWORDS: &str = "(subscription OR renewal OR \"auto-renewal\" OR \"recurring payment\" OR \"recurring charge\" OR 更新 OR 定期 OR サブスク OR 月額 OR 年額)";
+
+/// Stage 2 (deeper, opt-in) — broader catch-all that picks up generic
+/// receipts and invoices. Used together with a recurrence filter so the
+/// extra noise gets squeezed out downstream.
+pub const BROAD_KEYWORDS: &str = "(invoice OR receipt OR subscription OR \"recurring payment\" OR renewal OR \"請求\" OR \"明細\" OR \"領収\" OR 更新 OR 定期 OR サブスク OR 月額 OR 年額)";
+
 const BODY_CHAR_LIMIT: usize = 8000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanMode {
+    /// Stage 1 — tight, precision-favored keywords.
+    Fast,
+    /// Stage 2 — broad keywords; the caller is expected to apply a
+    /// recurrence filter on the results.
+    Deep,
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
 pub struct YearMonth {
@@ -42,7 +61,11 @@ fn last_day_of_month(year: i32, month: u32) -> u32 {
 /// year/month ranges. Each month becomes an `after:Y/M/01 before:Y/M/last_day`
 /// clause, ORed together. Empty range omits the date filter.
 #[must_use]
-pub fn build_query_for_range(months: &[YearMonth]) -> String {
+pub fn build_query_for_range(months: &[YearMonth], mode: ScanMode) -> String {
+    let keywords = match mode {
+        ScanMode::Fast => TIGHT_KEYWORDS,
+        ScanMode::Deep => BROAD_KEYWORDS,
+    };
     let mut date_clauses = Vec::new();
     for ym in months {
         let last = last_day_of_month(ym.year, ym.month);
@@ -52,9 +75,9 @@ pub fn build_query_for_range(months: &[YearMonth]) -> String {
         ));
     }
     if date_clauses.is_empty() {
-        SEARCH_KEYWORDS.to_string()
+        keywords.to_string()
     } else {
-        format!("{SEARCH_KEYWORDS} ({})", date_clauses.join(" OR "))
+        format!("{keywords} ({})", date_clauses.join(" OR "))
     }
 }
 
@@ -218,12 +241,13 @@ pub fn message_ref_from(message: &Value, id: &str) -> GmailMessageRef {
     }
 }
 
-/// Fetch + extract body + run LLM extraction in one shot.
+/// Fetch + extract body + run LLM extraction in one shot. Returns `Ok(None)`
+/// when the LLM classifies the message as non-subscription.
 pub async fn parse_message(
     provider: &LlmClient,
     access_token: &str,
     message_id: &str,
-) -> Result<ParsedSubscriptionHint> {
+) -> Result<Option<ParsedSubscriptionHint>> {
     let msg = fetch_message(access_token, message_id).await?;
     let body = extract_text_body(&msg)
         .ok_or_else(|| Error::Parser(format!("gmail message {message_id}: no text body")))?;

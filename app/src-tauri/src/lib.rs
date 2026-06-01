@@ -22,7 +22,7 @@ use kinketsu_core::parsers::{
     self, ParsedSubscriptionHint, extract_from_text, extract_many_from_text,
 };
 use sqlx::SqlitePool;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 use uuid::Uuid;
 
@@ -302,6 +302,7 @@ pub struct YearMonthDto {
 #[tauri::command]
 #[specta::specta]
 async fn run_gmail_scan(
+    app: AppHandle,
     state: State<'_, AppState>,
     range: Vec<YearMonthDto>,
 ) -> Result<usize, String> {
@@ -339,7 +340,9 @@ async fn run_gmail_scan(
         })
         .collect();
 
-    let query = parsers::gmail::build_query_for_range(&months);
+    // Stage 1: tight, precision-favored Gmail keywords.
+    let query =
+        parsers::gmail::build_query_for_range(&months, parsers::gmail::ScanMode::Fast);
     let msg_ids = parsers::gmail::list_message_ids(&access_token, &query)
         .await
         .map_err(|e| e.to_string())?;
@@ -347,15 +350,37 @@ async fn run_gmail_scan(
     // Reset cancel flag at the start of every scan.
     state.scan_cancel.store(false, Ordering::Relaxed);
 
+    let total = msg_ids.len();
     let mut created = 0usize;
     let mut skipped_seen = 0usize;
     let mut skipped_fetch = 0usize;
     let mut skipped_body = 0usize;
     let mut skipped_extract = 0usize;
-    for id in &msg_ids {
+    let mut skipped_classified = 0usize;
+
+    let emit_progress = |processed: usize,
+                         created: usize,
+                         skipped_classified: usize,
+                         skipped_seen: usize| {
+        let _ = app.emit(
+            "scan-progress",
+            serde_json::json!({
+                "processed": processed,
+                "total": total,
+                "created": created,
+                "skippedClassified": skipped_classified,
+                "skippedSeen": skipped_seen,
+            }),
+        );
+    };
+
+    // Initial emit so the UI shows "0 / total" right away.
+    emit_progress(0, 0, 0, 0);
+
+    for (idx, id) in msg_ids.iter().enumerate() {
         if state.scan_cancel.load(Ordering::Relaxed) {
             log::info!(
-                "gmail scan cancelled: created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract}"
+                "gmail scan cancelled: created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract} skipped_classified={skipped_classified}"
             );
             return Err("scan cancelled".to_string());
         }
@@ -366,6 +391,7 @@ async fn run_gmail_scan(
             .is_some()
         {
             skipped_seen += 1;
+            emit_progress(idx + 1, created, skipped_classified, skipped_seen);
             continue;
         }
 
@@ -374,6 +400,7 @@ async fn run_gmail_scan(
             Err(e) => {
                 log::warn!("gmail scan: fetch_message({id}) failed: {e}");
                 skipped_fetch += 1;
+                emit_progress(idx + 1, created, skipped_classified, skipped_seen);
                 continue;
             }
         };
@@ -382,17 +409,26 @@ async fn run_gmail_scan(
             None => {
                 log::warn!("gmail scan: no text body in message {id}");
                 skipped_body += 1;
+                emit_progress(idx + 1, created, skipped_classified, skipped_seen);
                 continue;
             }
         };
 
-        let hint = match extract_from_text(&llm, body).await {
+        let hint_opt = match extract_from_text(&llm, body).await {
             Ok(h) => h,
             Err(e) => {
                 log::warn!("gmail scan: LLM extract for {id} failed: {e}");
                 skipped_extract += 1;
+                emit_progress(idx + 1, created, skipped_classified, skipped_seen);
                 continue;
             }
+        };
+
+        // LLM gate: None means "this isn't a recurring subscription".
+        let Some(hint) = hint_opt else {
+            skipped_classified += 1;
+            emit_progress(idx + 1, created, skipped_classified, skipped_seen);
+            continue;
         };
 
         let msg_ref = parsers::gmail::message_ref_from(&msg, id);
@@ -420,11 +456,11 @@ async fn run_gmail_scan(
             .map_err(|e| e.to_string())?;
 
         created += 1;
+        emit_progress(idx + 1, created, skipped_classified, skipped_seen);
     }
 
     log::info!(
-        "gmail scan done: matched={} created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract}",
-        msg_ids.len()
+        "gmail scan done: matched={total} created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract} skipped_classified={skipped_classified}"
     );
     Ok(created)
 }
@@ -941,9 +977,13 @@ async fn extract_subscription_from_text(
         .ok_or_else(|| "no LLM provider configured".to_string())?;
 
     let client = LlmClient::from_config(cfg);
-    extract_from_text(&client, text)
+    match extract_from_text(&client, text)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?
+    {
+        Some(h) => Ok(h),
+        None => Err("LLM classified this text as not a recurring subscription".to_string()),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

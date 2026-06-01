@@ -1,5 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { OAuthCredentials, YearMonth } from '$lib/types';
+
+export type ScanProgress = {
+	processed: number;
+	total: number;
+	created: number;
+	skippedClassified: number;
+	skippedSeen: number;
+};
 
 class GmailStore {
 	credentials = $state<OAuthCredentials | null>(null);
@@ -10,6 +19,7 @@ class GmailStore {
 	scanning = $state(false);
 	error = $state<string | null>(null);
 	lastScanResult = $state<number | null>(null);
+	progress = $state<ScanProgress | null>(null);
 
 	async load() {
 		this.loading = true;
@@ -86,7 +96,13 @@ class GmailStore {
 		this.scanning = true;
 		this.error = null;
 		this.lastScanResult = null;
+		this.progress = null;
+
+		let unlisten: UnlistenFn | null = null;
 		try {
+			unlisten = await listen<ScanProgress>('scan-progress', (event) => {
+				this.progress = event.payload;
+			});
 			const created = await invoke<number>('run_gmail_scan', { range });
 			this.lastScanResult = created;
 			return created;
@@ -94,7 +110,9 @@ class GmailStore {
 			this.error = String(e);
 			throw e;
 		} finally {
+			if (unlisten) unlisten();
 			this.scanning = false;
+			this.progress = null;
 		}
 	}
 }

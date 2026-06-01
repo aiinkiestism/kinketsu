@@ -206,6 +206,9 @@ const EN: Record<string, string> = {
 	'inbox.scan_needs_connection': 'Connect Gmail first.',
 	'inbox.scan_needs_llm': 'Configure an LLM provider in Settings first.',
 	'inbox.scan_cancelled': 'Scan cancelled.',
+	'inbox.scan_progress': 'Scanning… {processed}/{total} · {created} subscriptions detected',
+	'inbox.scan_progress_detail':
+		'{classified} skipped by LLM as not a subscription · {seen} already in inbox',
 
 	'inbox.error_gmail_disabled_title': 'Gmail API is not enabled in your Google Cloud project',
 	'inbox.error_gmail_disabled_msg':

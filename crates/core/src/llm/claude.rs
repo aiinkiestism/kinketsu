@@ -14,6 +14,9 @@ const URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const TOOL_NAME: &str = "record_subscription";
 const MAX_TOKENS: u32 = 1024;
+const MAX_RETRIES: u32 = 3;
+const DEFAULT_RETRY_AFTER_SECS: u64 = 30;
+const MAX_RETRY_AFTER_SECS: u64 = 120;
 
 pub struct ClaudeProvider {
     api_key: String,
@@ -47,15 +50,40 @@ impl ClaudeProvider {
             ],
         });
 
-        let resp = self
-            .client
-            .post(URL)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
+        let mut attempt: u32 = 0;
+        let resp = loop {
+            attempt += 1;
+            let r = self
+                .client
+                .post(URL)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", ANTHROPIC_VERSION)
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await?;
+
+            let status = r.status();
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
+                // Respect Retry-After when present (Anthropic also exposes
+                // anthropic-ratelimit-* but Retry-After is the canonical hint).
+                let wait = r
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or_else(|| DEFAULT_RETRY_AFTER_SECS * u64::from(attempt))
+                    .min(MAX_RETRY_AFTER_SECS);
+                let body_text = r.text().await.unwrap_or_default();
+                tracing::warn!(
+                    "claude 429 (attempt {attempt}/{MAX_RETRIES}), sleeping {wait}s: {body_text}"
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                continue;
+            }
+
+            break r;
+        };
 
         let status = resp.status();
         if !status.is_success() {

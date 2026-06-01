@@ -68,9 +68,9 @@
 	let showGmailSecret = $state(false);
 	let showPaypalSecret = $state(false);
 
-	function handleLocaleChange(e: Event) {
+	async function handleLocaleChange(e: Event) {
 		const next = (e.target as HTMLSelectElement).value as LocaleCode;
-		i18n.setLocale(next);
+		await i18n.setLocale(next);
 	}
 
 	async function handleCheckRenewals() {
@@ -431,11 +431,18 @@
 
 		<label>
 			<span>{t('settings.language_heading')}</span>
-			<select value={i18n.locale} onchange={handleLocaleChange}>
+			<select
+				value={i18n.locale}
+				onchange={handleLocaleChange}
+				disabled={i18n.translating}
+			>
 				<option value="en">{t('settings.language_en')}</option>
 				<option value="ja">{t('settings.language_ja')}</option>
 			</select>
 		</label>
+		{#if i18n.translating}
+			<p class="muted small">{t('settings.language_translating')}</p>
+		{/if}
 	</section>
 </div>
 

@@ -50,4 +50,9 @@ pub mod keys {
     pub const PAYPAL_OAUTH_CREDS: &str = "paypal.oauth_credentials";
     pub const PAYPAL_TOKENS: &str = "paypal.tokens";
     pub const DEFAULT_CURRENCY: &str = "user.default_currency";
+    pub const USER_LOCALE: &str = "user.locale";
+    /// Per-locale translation cache key prefix. The full key is
+    /// `translations.<locale>` (e.g. `translations.ja`). The value is a JSON
+    /// object mapping source-string keys → translated strings.
+    pub const TRANSLATIONS_PREFIX: &str = "translations.";
 }

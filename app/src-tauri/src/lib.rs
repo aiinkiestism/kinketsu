@@ -3,9 +3,11 @@
 //! Holds the SQLite pool in app state and exposes the v0.1 commands the
 //! SvelteKit frontend calls via `@tauri-apps/api/core::invoke`.
 
+use std::collections::HashMap;
+
 use kinketsu_core::currency::ExchangeRate;
 use kinketsu_core::db;
-use kinketsu_core::llm::{LlmClient, LlmConfig};
+use kinketsu_core::llm::{ExtractionRequest, LlmClient, LlmConfig};
 use kinketsu_core::models::{
     Category, DetectionEvent, DetectionSource, DetectionStatus, NewCategory, NewPaymentMethod,
     NewSubscription, PaymentMethod, Subscription,
@@ -460,15 +462,47 @@ async fn run_paypal_scan(state: State<'_, AppState>) -> Result<usize, String> {
 
 // ---- Renewal notifications ----
 
+const NOTIF_TITLE_TEMPLATE: &str = "{name} renews soon";
+const NOTIF_BODY_TEMPLATE: &str = "Next charge: {date}";
+
+async fn notification_templates(pool: &SqlitePool) -> (String, String) {
+    let locale = db::settings::get::<String>(pool, db::settings::keys::USER_LOCALE)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "en".to_string());
+    if locale == "en" {
+        return (
+            NOTIF_TITLE_TEMPLATE.to_string(),
+            NOTIF_BODY_TEMPLATE.to_string(),
+        );
+    }
+    let cache = db::settings::get::<HashMap<String, String>>(pool, &translations_key(&locale))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let title = cache
+        .get(NOTIF_TITLE_TEMPLATE)
+        .cloned()
+        .unwrap_or_else(|| NOTIF_TITLE_TEMPLATE.to_string());
+    let body = cache
+        .get(NOTIF_BODY_TEMPLATE)
+        .cloned()
+        .unwrap_or_else(|| NOTIF_BODY_TEMPLATE.to_string());
+    (title, body)
+}
+
 async fn notify_renewals(handle: &AppHandle, pool: &SqlitePool) -> Result<usize, String> {
     let due = db::subscriptions::list_due_within(pool, 7)
         .await
         .map_err(|e| e.to_string())?;
+    let (title_template, body_template) = notification_templates(pool).await;
     let mut sent = 0usize;
     for sub in &due {
         if let Some(date) = sub.next_billing_date {
-            let title = format!("{} renews soon", sub.name);
-            let body = format!("Next charge: {date}");
+            let title = title_template.replace("{name}", &sub.name);
+            let body = body_template.replace("{date}", &date.to_string());
             if handle
                 .notification()
                 .builder()
@@ -517,6 +551,104 @@ async fn set_default_currency(state: State<'_, AppState>, currency: String) -> R
     db::settings::set(&state.pool, db::settings::keys::DEFAULT_CURRENCY, &currency)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn get_user_locale(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    db::settings::get::<String>(&state.pool, db::settings::keys::USER_LOCALE)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn set_user_locale(state: State<'_, AppState>, locale: String) -> Result<(), String> {
+    db::settings::set(&state.pool, db::settings::keys::USER_LOCALE, &locale)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ---- Translation (LLM-driven, cached in settings) ----
+
+fn translations_key(locale: &str) -> String {
+    format!("{}{}", db::settings::keys::TRANSLATIONS_PREFIX, locale)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn get_translations(
+    state: State<'_, AppState>,
+    locale: String,
+) -> Result<Option<HashMap<String, String>>, String> {
+    db::settings::get::<HashMap<String, String>>(&state.pool, &translations_key(&locale))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn save_translations(
+    state: State<'_, AppState>,
+    locale: String,
+    translations: HashMap<String, String>,
+) -> Result<(), String> {
+    db::settings::set(&state.pool, &translations_key(&locale), &translations)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Translate a batch of English strings to `target_locale` using the user's
+/// configured LLM provider. Returns a map of same keys → translated values.
+/// Placeholder tokens (`{name}`, `{count}`, etc.) must be preserved by the LLM.
+#[tauri::command]
+#[specta::specta]
+async fn translate_strings(
+    state: State<'_, AppState>,
+    target_locale: String,
+    strings: HashMap<String, String>,
+) -> Result<HashMap<String, String>, String> {
+    if strings.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let cfg: LlmConfig = db::settings::get(&state.pool, db::settings::keys::LLM_CONFIG)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no LLM provider configured".to_string())?;
+    let llm = LlmClient::from_config(cfg);
+
+    let user_content = serde_json::to_string(&strings).map_err(|e| e.to_string())?;
+
+    let req = ExtractionRequest {
+        system_prompt: format!(
+            "You are a translator. The user supplies a JSON object whose values are user-interface strings written in English. Translate each value to the BCP-47 locale \"{target_locale}\". Keep the keys exactly as supplied. Preserve every placeholder token like {{count}}, {{currency}}, {{name}}, {{date}} verbatim — do not translate or remove them. The product name \"kinketsu\" must always appear as the bare ASCII string and is never translated. Return only the translations object as JSON."
+        ),
+        user_content,
+        schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "translations": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" }
+                }
+            },
+            "required": ["translations"]
+        }),
+    };
+
+    let resp = llm.extract(req).await.map_err(|e| e.to_string())?;
+    let obj = resp
+        .data
+        .get("translations")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| "LLM response missing 'translations' object".to_string())?;
+
+    let map: HashMap<String, String> = obj
+        .iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+        .collect();
+    Ok(map)
 }
 
 // ---- Exchange rates ----
@@ -701,6 +833,11 @@ pub fn run() {
             list_exchange_rates,
             get_default_currency,
             set_default_currency,
+            get_user_locale,
+            set_user_locale,
+            get_translations,
+            save_translations,
+            translate_strings,
             export_subscriptions_ics,
             save_gmail_oauth_credentials,
             get_gmail_oauth_credentials,

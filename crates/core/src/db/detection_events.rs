@@ -17,6 +17,7 @@ struct DetectionEventRow {
     source: DetectionSource,
     source_ref: Option<String>,
     raw_summary: Option<String>,
+    sender: Option<String>,
     parsed_payload: String,
     confidence: f32,
     status: DetectionStatus,
@@ -33,6 +34,7 @@ impl TryFrom<DetectionEventRow> for DetectionEvent {
             source: r.source,
             source_ref: r.source_ref,
             raw_summary: r.raw_summary,
+            sender: r.sender,
             parsed_payload: serde_json::from_str(&r.parsed_payload)?,
             confidence: r.confidence,
             status: r.status,
@@ -77,14 +79,15 @@ pub async fn insert(pool: &SqlitePool, ev: &DetectionEvent) -> Result<()> {
     let payload = serde_json::to_string(&ev.parsed_payload)?;
     sqlx::query(
         "INSERT INTO detection_events (
-            id, source, source_ref, raw_summary, parsed_payload,
+            id, source, source_ref, raw_summary, sender, parsed_payload,
             confidence, status, matched_subscription_id, reviewed_at, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(ev.id)
     .bind(ev.source)
     .bind(&ev.source_ref)
     .bind(&ev.raw_summary)
+    .bind(&ev.sender)
     .bind(payload)
     .bind(ev.confidence)
     .bind(ev.status)

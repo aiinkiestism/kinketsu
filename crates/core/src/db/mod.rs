@@ -15,6 +15,7 @@ use crate::Result;
 pub mod categories;
 pub mod detection_events;
 pub mod exchange_rates;
+pub mod learned_senders;
 pub mod payment_methods;
 pub mod settings;
 pub mod subscriptions;

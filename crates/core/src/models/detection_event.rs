@@ -15,6 +15,9 @@ pub struct DetectionEvent {
     /// Stable external reference, e.g. Gmail message-id. Full message body is never stored.
     pub source_ref: Option<String>,
     pub raw_summary: Option<String>,
+    /// Normalized sender (lowercased email) for sender-learning. Optional
+    /// because not every source has a sender concept (e.g. manual / csv).
+    pub sender: Option<String>,
     pub parsed_payload: serde_json::Value,
     pub confidence: f32,
     pub status: DetectionStatus,

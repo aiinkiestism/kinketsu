@@ -436,6 +436,7 @@ async fn scan_csv(
             source: kinketsu_core::models::DetectionSource::CsvImport,
             source_ref: None,
             raw_summary: Some(summary),
+            sender: None,
             parsed_payload: payload,
             confidence: 0.0,
             status: DetectionStatus::Pending,

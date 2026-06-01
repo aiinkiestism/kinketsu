@@ -271,6 +271,7 @@ async fn detection_events_crud_and_status_transition() {
         source: DetectionSource::Gmail,
         source_ref: Some("gmail-123".into()),
         raw_summary: Some("Netflix renewal".into()),
+        sender: Some("[email protected]".into()),
         parsed_payload: serde_json::json!({ "service_name": "Netflix" }),
         confidence: 0.85,
         status: DetectionStatus::Pending,

@@ -14,8 +14,8 @@ use kinketsu_core::currency::ExchangeRate;
 use kinketsu_core::db;
 use kinketsu_core::llm::{ExtractionRequest, LlmClient, LlmConfig};
 use kinketsu_core::models::{
-    Category, DetectionEvent, DetectionSource, DetectionStatus, NewCategory, NewPaymentMethod,
-    NewSubscription, PaymentMethod, Subscription,
+    Category, DetectionEvent, DetectionSource, DetectionStatus, LearnedDecision, LearnedSender,
+    NewCategory, NewPaymentMethod, NewSubscription, PaymentMethod, Subscription,
 };
 use kinketsu_core::oauth::{self, OAuthCredentials, Tokens};
 use kinketsu_core::parsers::{
@@ -37,6 +37,19 @@ pub struct AppState {
     /// checks this at every iteration so the UI's Cancel button can bail
     /// out without waiting for the next LLM round-trip to finish.
     pub scan_cancel: Arc<AtomicBool>,
+}
+
+/// Pull a clean lowercased email address out of an RFC-5322 `From` header
+/// value (`Name <[email protected]>` → `[email protected]`). Returns the trimmed
+/// lowercase original if there's no angle-bracketed address.
+fn normalize_sender(raw: &str) -> String {
+    if let Some(start) = raw.rfind('<')
+        && let Some(end_rel) = raw[start..].find('>')
+    {
+        let inner = &raw[start + 1..start + end_rel];
+        return inner.trim().to_ascii_lowercase();
+    }
+    raw.trim().to_ascii_lowercase()
 }
 
 fn arm_oauth_cancel(state: &AppState) -> oneshot::Receiver<()> {
@@ -357,11 +370,13 @@ async fn run_gmail_scan(
     let mut skipped_body = 0usize;
     let mut skipped_extract = 0usize;
     let mut skipped_classified = 0usize;
+    let mut skipped_blocked = 0usize;
 
     let emit_progress = |processed: usize,
                          created: usize,
                          skipped_classified: usize,
-                         skipped_seen: usize| {
+                         skipped_seen: usize,
+                         skipped_blocked: usize| {
         let _ = app.emit(
             "scan-progress",
             serde_json::json!({
@@ -370,17 +385,18 @@ async fn run_gmail_scan(
                 "created": created,
                 "skippedClassified": skipped_classified,
                 "skippedSeen": skipped_seen,
+                "skippedBlocked": skipped_blocked,
             }),
         );
     };
 
     // Initial emit so the UI shows "0 / total" right away.
-    emit_progress(0, 0, 0, 0);
+    emit_progress(0, 0, 0, 0, 0);
 
     for (idx, id) in msg_ids.iter().enumerate() {
         if state.scan_cancel.load(Ordering::Relaxed) {
             log::info!(
-                "gmail scan cancelled: created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract} skipped_classified={skipped_classified}"
+                "gmail scan cancelled: created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract} skipped_classified={skipped_classified} skipped_blocked={skipped_blocked}"
             );
             return Err("scan cancelled".to_string());
         }
@@ -391,7 +407,7 @@ async fn run_gmail_scan(
             .is_some()
         {
             skipped_seen += 1;
-            emit_progress(idx + 1, created, skipped_classified, skipped_seen);
+            emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
             continue;
         }
 
@@ -400,16 +416,31 @@ async fn run_gmail_scan(
             Err(e) => {
                 log::warn!("gmail scan: fetch_message({id}) failed: {e}");
                 skipped_fetch += 1;
-                emit_progress(idx + 1, created, skipped_classified, skipped_seen);
+                emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
                 continue;
             }
         };
+
+        // Normalize sender from the From header before paying for the LLM.
+        // If the sender is on the user-built blocklist, skip immediately.
+        let msg_ref = parsers::gmail::message_ref_from(&msg, id);
+        let sender = msg_ref.from.as_deref().map(normalize_sender);
+        if let Some(ref s) = sender
+            && let Ok(Some(learned)) = db::learned_senders::find(&state.pool, s).await
+            && learned.decision == LearnedDecision::Block
+        {
+            log::info!("gmail scan: sender {s} on blocklist, skipping {id}");
+            skipped_blocked += 1;
+            emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
+            continue;
+        }
+
         let body = match parsers::gmail::extract_text_body(&msg) {
             Some(b) => b,
             None => {
                 log::warn!("gmail scan: no text body in message {id}");
                 skipped_body += 1;
-                emit_progress(idx + 1, created, skipped_classified, skipped_seen);
+                emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
                 continue;
             }
         };
@@ -419,7 +450,7 @@ async fn run_gmail_scan(
             Err(e) => {
                 log::warn!("gmail scan: LLM extract for {id} failed: {e}");
                 skipped_extract += 1;
-                emit_progress(idx + 1, created, skipped_classified, skipped_seen);
+                emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
                 continue;
             }
         };
@@ -427,11 +458,10 @@ async fn run_gmail_scan(
         // LLM gate: None means "this isn't a recurring subscription".
         let Some(hint) = hint_opt else {
             skipped_classified += 1;
-            emit_progress(idx + 1, created, skipped_classified, skipped_seen);
+            emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
             continue;
         };
 
-        let msg_ref = parsers::gmail::message_ref_from(&msg, id);
         let summary = msg_ref
             .subject
             .clone()
@@ -443,6 +473,7 @@ async fn run_gmail_scan(
             source: DetectionSource::Gmail,
             source_ref: Some(id.clone()),
             raw_summary: Some(summary),
+            sender: sender.clone(),
             parsed_payload: payload,
             confidence: 0.0,
             status: DetectionStatus::Pending,
@@ -456,11 +487,11 @@ async fn run_gmail_scan(
             .map_err(|e| e.to_string())?;
 
         created += 1;
-        emit_progress(idx + 1, created, skipped_classified, skipped_seen);
+        emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
     }
 
     log::info!(
-        "gmail scan done: matched={total} created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract} skipped_classified={skipped_classified}"
+        "gmail scan done: matched={total} created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract} skipped_classified={skipped_classified} skipped_blocked={skipped_blocked}"
     );
     Ok(created)
 }
@@ -839,6 +870,7 @@ async fn import_csv_text(state: State<'_, AppState>, text: String) -> Result<usi
             source: DetectionSource::CsvImport,
             source_ref: None,
             raw_summary: Some(summary),
+            sender: None,
             parsed_payload: payload,
             confidence: 0.0,
             status: DetectionStatus::Pending,
@@ -923,6 +955,11 @@ async fn confirm_detection_event(
     .await
     .map_err(|e| e.to_string())?;
 
+    // Learn: future scans treat this sender as known-good.
+    if let Some(sender) = ev.sender.as_deref() {
+        let _ = db::learned_senders::upsert(&state.pool, sender, LearnedDecision::Allow).await;
+    }
+
     Ok(sub)
 }
 
@@ -933,7 +970,7 @@ async fn confirm_detection_event_with_overrides(
     id: Uuid,
     sub: NewSubscription,
 ) -> Result<Subscription, String> {
-    let _ev = db::detection_events::get(&state.pool, id)
+    let ev = db::detection_events::get(&state.pool, id)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "detection event not found".to_string())?;
@@ -952,13 +989,48 @@ async fn confirm_detection_event_with_overrides(
     .await
     .map_err(|e| e.to_string())?;
 
+    if let Some(sender) = ev.sender.as_deref() {
+        let _ = db::learned_senders::upsert(&state.pool, sender, LearnedDecision::Allow).await;
+    }
+
     Ok(new_sub)
 }
 
 #[tauri::command]
 #[specta::specta]
 async fn reject_detection_event(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
+    let ev = db::detection_events::get(&state.pool, id)
+        .await
+        .map_err(|e| e.to_string())?;
+
     db::detection_events::update_status(&state.pool, id, DetectionStatus::Rejected, None)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Learn: future scans skip this sender before paying for an LLM call.
+    if let Some(sender) = ev.and_then(|e| e.sender) {
+        let _ = db::learned_senders::upsert(&state.pool, &sender, LearnedDecision::Block).await;
+    }
+    Ok(())
+}
+
+// ---- Learned senders ----
+
+#[tauri::command]
+#[specta::specta]
+async fn list_learned_senders(state: State<'_, AppState>) -> Result<Vec<LearnedSender>, String> {
+    db::learned_senders::list_all(&state.pool)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn delete_learned_sender(
+    state: State<'_, AppState>,
+    sender: String,
+) -> Result<(), String> {
+    db::learned_senders::delete(&state.pool, &sender)
         .await
         .map_err(|e| e.to_string())
 }
@@ -1010,6 +1082,8 @@ pub fn run() {
             confirm_detection_event,
             confirm_detection_event_with_overrides,
             reject_detection_event,
+            list_learned_senders,
+            delete_learned_sender,
             refresh_exchange_rates,
             list_exchange_rates,
             get_default_currency,

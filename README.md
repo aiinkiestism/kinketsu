@@ -84,6 +84,23 @@ pnpm dev
 # equivalent to: cd app && pnpm tauri dev
 ```
 
+### Run on Android
+
+Prerequisites: Android Studio with SDK + NDK + JDK 17. Set
+`ANDROID_HOME` (e.g. `~/Library/Android/sdk`) and `NDK_HOME`
+(e.g. `$ANDROID_HOME/ndk/<version>`).
+
+```sh
+# one-time scaffold (creates app/src-tauri/gen/android/)
+pnpm android:init
+
+# dev with hot reload on a connected device or emulator
+pnpm android:dev
+
+# release AAB / APK
+pnpm android:build
+```
+
 ### Run the standalone server (self-host target)
 
 ```sh

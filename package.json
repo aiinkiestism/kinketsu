@@ -8,6 +8,9 @@
 		"tauri": "cd app && pnpm tauri",
 		"web:dev": "cd app && pnpm dev",
 		"web:build": "cd app && pnpm build",
-		"check": "cd app && pnpm check"
+		"check": "cd app && pnpm check",
+		"android:init": "cd app && pnpm tauri android init",
+		"android:dev": "cd app && pnpm tauri android dev",
+		"android:build": "cd app && pnpm tauri android build"
 	}
 }

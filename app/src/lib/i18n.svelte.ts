@@ -18,7 +18,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'nav.scan': 'Scan',
 		'nav.settings': 'Settings',
 
-		'dashboard.monthly_total': 'Monthly equivalent total (JPY)',
+		'dashboard.monthly_total': 'Monthly equivalent total ({currency})',
 		'dashboard.active_one': '1 active subscription',
 		'dashboard.active_other': '{count} active subscriptions',
 		'dashboard.upcoming': 'Upcoming charges',
@@ -136,6 +136,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.rates_last': 'Last refreshed:',
 		'settings.rates_never': 'never',
 		'settings.rates_refresh': 'Refresh rates',
+		'settings.rates_default_currency': 'Default currency',
 		'settings.rates_count': '{count} rates cached',
 
 		'scan.heading': 'Scan a receipt',
@@ -212,7 +213,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'nav.scan': 'スキャン',
 		'nav.settings': '設定',
 
-		'dashboard.monthly_total': '月額換算合計 (JPY)',
+		'dashboard.monthly_total': '月額換算合計 ({currency})',
 		'dashboard.active_one': 'アクティブ 1 件',
 		'dashboard.active_other': 'アクティブ {count} 件',
 		'dashboard.upcoming': 'このあと請求',
@@ -330,6 +331,7 @@ const dictionaries: Record<LocaleCode, Record<string, string>> = {
 		'settings.rates_last': '最終更新:',
 		'settings.rates_never': '未取得',
 		'settings.rates_refresh': 'レートを更新',
+		'settings.rates_default_currency': '基準通貨',
 		'settings.rates_count': 'キャッシュ済み {count} 件',
 
 		'scan.heading': '明細をスキャン',

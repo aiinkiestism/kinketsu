@@ -23,6 +23,24 @@ export type PaymentMethodKind =
 	| 'crypto'
 	| 'other';
 
+/**
+ * Default currency by locale. Used as the seeded preference when the user
+ * hasn't picked a default currency yet. The dashboard total and the
+ * subscription form pre-select this value.
+ */
+export const LOCALE_DEFAULT_CURRENCY: Record<string, string> = {
+	en: 'USD',
+	ja: 'JPY'
+};
+
+/**
+ * Minor-unit divisor per ISO 4217 currency. Most currencies use 100 minor units
+ * per major unit (cents); JPY is the notable exception with 1:1.
+ */
+export function minorPerMajor(currency: string): number {
+	return currency === 'JPY' ? 1 : 100;
+}
+
 export const CURRENCIES: readonly string[] = [
 	'JPY',
 	'USD',

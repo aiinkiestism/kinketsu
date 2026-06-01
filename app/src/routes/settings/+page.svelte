@@ -7,6 +7,7 @@
 	import { paypal } from '$lib/stores/paypal.svelte';
 	import { i18n, t, tn, type LocaleCode } from '$lib/i18n.svelte';
 	import {
+		CURRENCIES,
 		LLM_PROVIDERS,
 		LLM_PROVIDER_LABEL,
 		LLM_DEFAULTS,
@@ -254,6 +255,18 @@
 				>
 			{/if}
 		</div>
+
+		<label>
+			<span>{t('settings.rates_default_currency')}</span>
+			<select
+				value={exchangeRates.base}
+				onchange={(e) => exchangeRates.setBase((e.target as HTMLSelectElement).value)}
+			>
+				{#each CURRENCIES as cur (cur)}
+					<option value={cur}>{cur}</option>
+				{/each}
+			</select>
+		</label>
 
 		<div class="actions">
 			<button

@@ -45,7 +45,7 @@
 	let editingSub = $state<Subscription | null>(null);
 	let formName = $state('');
 	let formAmount = $state<number>(0);
-	let formCurrency = $state('JPY');
+	let formCurrency = $state(exchangeRates.base || 'JPY');
 	let formCycle = $state<BillingCycle>('monthly');
 	let formStatus = $state<SubscriptionStatus>('active');
 	let formPlan = $state('');
@@ -59,7 +59,7 @@
 		editingSub = null;
 		formName = '';
 		formAmount = 0;
-		formCurrency = 'JPY';
+		formCurrency = exchangeRates.base || 'JPY';
 		formCycle = 'monthly';
 		formStatus = 'active';
 		formPlan = '';
@@ -103,6 +103,10 @@
 		return currency === 'JPY' ? amount_minor : amount_minor / 100;
 	}
 
+	function baseFractionDigits(): number {
+		return exchangeRates.base === 'JPY' ? 0 : 2;
+	}
+
 	function formatMoney(amount_minor: number, currency: string): string {
 		try {
 			return new Intl.NumberFormat(i18n.bcp47, {
@@ -128,13 +132,12 @@
 		return amount_minor / CYCLE_MONTHS[cycle];
 	}
 
-	let monthlyTotalJpy = $derived(
+	let monthlyTotalBase = $derived(
 		subscriptions.items
 			.filter((s) => s.status === 'active')
 			.reduce((sum, s) => {
 				const monthlyMinor = monthlyEquivalentMinor(s.amount_minor, s.billing_cycle);
-				if (s.currency === 'JPY') return sum + monthlyMinor;
-				const converted = exchangeRates.toJpyMinor(monthlyMinor, s.currency);
+				const converted = exchangeRates.toBaseMinor(monthlyMinor, s.currency);
 				return converted !== null ? sum + converted : sum;
 			}, 0)
 	);
@@ -143,8 +146,8 @@
 		subscriptions.items.filter(
 			(s) =>
 				s.status === 'active' &&
-				s.currency !== 'JPY' &&
-				exchangeRates.toJpyMinor(s.amount_minor, s.currency) === null
+				s.currency !== exchangeRates.base &&
+				exchangeRates.toBaseMinor(s.amount_minor, s.currency) === null
 		).length
 	);
 
@@ -298,7 +301,11 @@
 		subscriptions.load();
 		paymentMethods.load();
 		categories.load();
-		exchangeRates.load();
+		exchangeRates.init(i18n.locale).then(() => {
+			if (!editingSub) {
+				formCurrency = exchangeRates.base;
+			}
+		});
 	});
 </script>
 
@@ -310,8 +317,8 @@
 
 	<section class="grid">
 		<article class="glass card">
-			<h2>{t('dashboard.monthly_total')}</h2>
-			<p class="big">{formatMoney(monthlyTotalJpy, 'JPY')}</p>
+			<h2>{t('dashboard.monthly_total', { currency: exchangeRates.base })}</h2>
+			<p class="big">{formatMoney(monthlyTotalBase, exchangeRates.base)}</p>
 			<p class="muted">{tn('dashboard.active', activeCount)}</p>
 			{#if unconvertibleCount > 0}
 				<p class="muted small warn">{tn('dashboard.unconvertible', unconvertibleCount)}</p>

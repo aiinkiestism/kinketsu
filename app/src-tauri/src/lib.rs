@@ -473,6 +473,22 @@ async fn export_subscriptions_ics(state: State<'_, AppState>) -> Result<String, 
     Ok(kinketsu_core::ics::export_subscriptions(&subs))
 }
 
+// ---- User preferences ----
+
+#[tauri::command]
+async fn get_default_currency(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    db::settings::get::<String>(&state.pool, db::settings::keys::DEFAULT_CURRENCY)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_default_currency(state: State<'_, AppState>, currency: String) -> Result<(), String> {
+    db::settings::set(&state.pool, db::settings::keys::DEFAULT_CURRENCY, &currency)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // ---- Exchange rates ----
 
 #[tauri::command]
@@ -682,6 +698,8 @@ pub fn run() {
             reject_detection_event,
             refresh_exchange_rates,
             list_exchange_rates,
+            get_default_currency,
+            set_default_currency,
             export_subscriptions_ics,
             save_gmail_oauth_credentials,
             get_gmail_oauth_credentials,

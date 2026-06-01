@@ -49,4 +49,5 @@ pub mod keys {
     pub const GMAIL_TOKENS: &str = "gmail.tokens";
     pub const PAYPAL_OAUTH_CREDS: &str = "paypal.oauth_credentials";
     pub const PAYPAL_TOKENS: &str = "paypal.tokens";
+    pub const DEFAULT_CURRENCY: &str = "user.default_currency";
 }

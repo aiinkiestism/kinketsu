@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ExchangeRate } from '$lib/types';
+import { LOCALE_DEFAULT_CURRENCY, minorPerMajor, type ExchangeRate } from '$lib/types';
 
 class ExchangeRatesStore {
 	base = $state('JPY');
@@ -10,6 +10,34 @@ class ExchangeRatesStore {
 
 	byQuote = $derived(new Map(this.items.map((r) => [r.quote, r.rate])));
 	lastFetched = $derived(this.items.length > 0 ? this.items[0].fetched_at : null);
+
+	/**
+	 * Initialize the store's base currency. Reads the persisted default from the
+	 * settings store; falls back to a locale-derived default; finally JPY.
+	 */
+	async init(locale: string) {
+		try {
+			const stored = await invoke<string | null>('get_default_currency');
+			if (stored) {
+				this.base = stored;
+			} else {
+				this.base = LOCALE_DEFAULT_CURRENCY[locale] ?? 'JPY';
+			}
+		} catch {
+			this.base = LOCALE_DEFAULT_CURRENCY[locale] ?? 'JPY';
+		}
+		await this.load();
+	}
+
+	async setBase(currency: string) {
+		this.base = currency;
+		try {
+			await invoke('set_default_currency', { currency });
+		} catch (e) {
+			this.error = String(e);
+		}
+		await this.load();
+	}
 
 	async load() {
 		this.loading = true;
@@ -38,19 +66,22 @@ class ExchangeRatesStore {
 	}
 
 	/**
-	 * Convert an `amount_minor` value in `currency` into JPY minor units (= yen)
-	 * using the cached rates. Returns null when no rate is available.
+	 * Convert `amount_minor` in `currency` into minor units of the configured
+	 * base currency, using the cached rates. Returns null when no rate is
+	 * available (e.g. user hasn't refreshed yet, or the API doesn't quote the
+	 * target).
 	 *
-	 * Conventions: JPY has no fractional unit so 1 minor == 1 yen. Other ISO 4217
-	 * currencies assume 1 major == 100 minor (cents). Rates are stored with
-	 * base = "JPY", so `rate[currency]` is currency-per-JPY (e.g. USD = 0.0064).
+	 * Convention: rates are stored with this.base on the left side, so
+	 * `rate[X]` means "X units per 1 base". To convert X amount to base, divide
+	 * by rate[X]. Minor-unit ratios respect JPY (1:1) vs. others (1:100).
 	 */
-	toJpyMinor(amount_minor: number, currency: string): number | null {
-		if (currency === 'JPY') return amount_minor;
+	toBaseMinor(amount_minor: number, currency: string): number | null {
+		if (currency === this.base) return amount_minor;
 		const rate = this.byQuote.get(currency);
 		if (!rate || rate === 0) return null;
-		const major = amount_minor / 100;
-		return Math.round(major / rate);
+		const amount_major = amount_minor / minorPerMajor(currency);
+		const base_major = amount_major / rate;
+		return Math.round(base_major * minorPerMajor(this.base));
 	}
 }
 

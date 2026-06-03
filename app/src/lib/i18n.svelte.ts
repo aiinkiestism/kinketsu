@@ -122,7 +122,7 @@ const EN: Record<string, string> = {
 
 	'settings.paypal_heading': 'PayPal integration',
 	'settings.paypal_description':
-		'kinketsu uses your PayPal Developer OAuth client (Log In with PayPal). Create one at developer.paypal.com/dashboard/applications and paste the client ID + secret. Scan is wired through token refresh only — the Transaction Search API integration is scoped for a follow-up.',
+		'kinketsu uses your PayPal Developer OAuth client (Log In with PayPal). Create one at developer.paypal.com/dashboard/applications and paste the client ID + secret. Personal PayPal accounts cannot use the Transaction Search API, so PayPal subscriptions are discovered via Gmail receipt parsing and PayPal Activity CSV import — connecting only verifies your identity.',
 	'settings.paypal_connected': 'Connected',
 	'settings.paypal_not_connected': 'Not connected',
 

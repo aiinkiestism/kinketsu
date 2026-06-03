@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { NewPaymentMethod, PaymentMethod } from '$lib/types';
+import type { NewPaymentMethod, PaymentMethod } from '$lib/bindings';
 
 class PaymentMethodsStore {
 	items = $state<PaymentMethod[]>([]);

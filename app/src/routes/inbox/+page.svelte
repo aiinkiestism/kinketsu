@@ -8,13 +8,8 @@
 	import { i18n, t, tn } from '$lib/i18n.svelte';
 	import MonthRangeSelect from '$lib/components/MonthRangeSelect.svelte';
 	import ErrorDialog from '$lib/components/ErrorDialog.svelte';
-	import {
-		CURRENCIES,
-		type BillingCycle,
-		type DetectionEvent,
-		type DetectionSource,
-		type YearMonth
-	} from '$lib/types';
+	import { CURRENCIES } from '$lib/constants';
+	import type { BillingCycle, DetectionEvent, DetectionSource, YearMonthDto } from '$lib/bindings';
 
 	type ScanErrorInfo = {
 		title: string;
@@ -116,7 +111,7 @@
 		}
 	}
 
-	let scanRange = $state<YearMonth[]>([]);
+	let scanRange = $state<YearMonthDto[]>([]);
 	let scanFeedback = $state<string | null>(null);
 
 	async function handleConnectGmail() {

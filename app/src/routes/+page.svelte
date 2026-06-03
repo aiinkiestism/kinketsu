@@ -6,17 +6,15 @@
 	import { categories } from '$lib/stores/categories.svelte';
 	import { exchangeRates } from '$lib/stores/exchange_rates.svelte';
 	import { i18n, t, tn } from '$lib/i18n.svelte';
-	import {
-		CURRENCIES,
-		PAYMENT_METHOD_KINDS,
-		SUBSCRIPTION_STATUSES,
-		type BillingCycle,
-		type Category,
-		type PaymentMethod,
-		type PaymentMethodKind,
-		type Subscription,
-		type SubscriptionStatus
-	} from '$lib/types';
+	import { CURRENCIES, PAYMENT_METHOD_KINDS, SUBSCRIPTION_STATUSES } from '$lib/constants';
+	import type {
+		BillingCycle,
+		Category,
+		PaymentMethod,
+		PaymentMethodKind,
+		Subscription,
+		SubscriptionStatus
+	} from '$lib/bindings';
 
 	let exporting = $state(false);
 

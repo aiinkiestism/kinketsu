@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { LlmConfig } from '$lib/types';
+import type { LlmConfig } from '$lib/bindings';
 
 class LlmConfigStore {
 	current = $state<LlmConfig | null>(null);

@@ -4,7 +4,7 @@
 	import { llmConfig } from '$lib/stores/llm_config.svelte';
 	import { subscriptions } from '$lib/stores/subscriptions.svelte';
 	import { i18n, t } from '$lib/i18n.svelte';
-	import type { BillingCycle, ParsedSubscriptionHint } from '$lib/types';
+	import type { BillingCycle, ParsedSubscriptionHint } from '$lib/bindings';
 
 	let text = $state('');
 	let scanning = $state(false);

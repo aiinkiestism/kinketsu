@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { OAuthCredentials } from '$lib/types';
+import type { OAuthCredentials } from '$lib/bindings';
 
 class PaypalStore {
 	credentials = $state<OAuthCredentials | null>(null);
@@ -7,7 +7,6 @@ class PaypalStore {
 	loading = $state(false);
 	saving = $state(false);
 	connecting = $state(false);
-	scanning = $state(false);
 	error = $state<string | null>(null);
 
 	async load() {
@@ -70,19 +69,6 @@ class PaypalStore {
 			this.connected = false;
 		} catch (e) {
 			this.error = String(e);
-		}
-	}
-
-	async runScan(): Promise<number> {
-		this.scanning = true;
-		this.error = null;
-		try {
-			return await invoke<number>('run_paypal_scan');
-		} catch (e) {
-			this.error = String(e);
-			throw e;
-		} finally {
-			this.scanning = false;
 		}
 	}
 }

@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::parsers::ParsedSubscriptionHint;
+
 /// A piece of evidence — usually a parsed email or PayPal subscription record —
 /// that may correspond to a subscription. Sits in a review queue until the user
 /// confirms or rejects.
@@ -18,6 +20,11 @@ pub struct DetectionEvent {
     /// Normalized sender (lowercased email) for sender-learning. Optional
     /// because not every source has a sender concept (e.g. manual / csv).
     pub sender: Option<String>,
+    /// Persisted as free JSON at the DB layer, but the extraction pipeline only
+    /// ever stores a serialized [`ParsedSubscriptionHint`]. Tell specta to emit
+    /// that concrete shape so the generated TS binding is fully typed instead of
+    /// a raw `serde_json::Value` union the frontend can't consume.
+    #[specta(type = ParsedSubscriptionHint)]
     pub parsed_payload: serde_json::Value,
     pub confidence: f32,
     pub status: DetectionStatus,

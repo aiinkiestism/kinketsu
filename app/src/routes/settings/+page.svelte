@@ -12,9 +12,9 @@
 		LLM_PROVIDER_LABEL,
 		LLM_DEFAULTS,
 		isCloudProvider,
-		type LlmConfig,
 		type LlmProviderKind
-	} from '$lib/types';
+	} from '$lib/constants';
+	import type { LlmConfig } from '$lib/bindings';
 
 	function formatTimestamp(iso: string): string {
 		try {

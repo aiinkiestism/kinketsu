@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { NewSubscription, Subscription } from '$lib/types';
+import type { NewSubscription, Subscription } from '$lib/bindings';
 
 class SubscriptionsStore {
 	items = $state<Subscription[]>([]);

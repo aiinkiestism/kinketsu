@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Category, NewCategory } from '$lib/types';
+import type { Category, NewCategory } from '$lib/bindings';
 
 class CategoriesStore {
 	items = $state<Category[]>([]);

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { DetectionEvent, NewSubscription, Subscription } from '$lib/types';
+import type { DetectionEvent, NewSubscription, Subscription } from '$lib/bindings';
 
 class DetectionEventsStore {
 	items = $state<DetectionEvent[]>([]);

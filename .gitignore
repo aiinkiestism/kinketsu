@@ -47,6 +47,3 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-
-# Generated TypeScript bindings (regenerated on every `tauri dev` debug run)
-app/src/lib/bindings.ts

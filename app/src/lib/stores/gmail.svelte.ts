@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { OAuthCredentials, YearMonth } from '$lib/types';
+import type { OAuthCredentials, YearMonthDto } from '$lib/bindings';
 
 export type ScanPhase = 'extracting' | 'indexing';
 
@@ -96,15 +96,15 @@ class GmailStore {
 		}
 	}
 
-	async runScan(range: YearMonth[]): Promise<number> {
+	async runScan(range: YearMonthDto[]): Promise<number> {
 		return this.runScanInner('run_gmail_scan', range);
 	}
 
-	async runDeepScan(range: YearMonth[]): Promise<number> {
+	async runDeepScan(range: YearMonthDto[]): Promise<number> {
 		return this.runScanInner('run_gmail_deep_scan', range);
 	}
 
-	private async runScanInner(command: string, range: YearMonth[]): Promise<number> {
+	private async runScanInner(command: string, range: YearMonthDto[]): Promise<number> {
 		this.scanning = true;
 		this.error = null;
 		this.lastScanResult = null;

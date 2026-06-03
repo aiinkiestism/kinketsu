@@ -854,33 +854,11 @@ async fn start_paypal_oauth(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-#[specta::specta]
-async fn run_paypal_scan(state: State<'_, AppState>) -> Result<usize, String> {
-    // PayPal's Transaction Search API is business-tier only — personal
-    // accounts get a 403 regardless of OAuth scope. We still exercise token
-    // refresh here so the user can see the OAuth connection is live, then
-    // surface the recommended path: PayPal email notifications are picked
-    // up by the Gmail scanner, and the PayPal "Activity Download" CSV will
-    // import once the CSV pipeline lands.
-    let creds: OAuthCredentials =
-        db::settings::get(&state.pool, db::settings::keys::PAYPAL_OAUTH_CREDS)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "PayPal OAuth credentials not configured".to_string())?;
-    let mut tokens: Tokens = db::settings::get(&state.pool, db::settings::keys::PAYPAL_TOKENS)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "PayPal not connected".to_string())?;
-    let _access = oauth::ensure_paypal_access_token(&creds, &mut tokens)
-        .await
-        .map_err(|e| e.to_string())?;
-    db::settings::set(&state.pool, db::settings::keys::PAYPAL_TOKENS, &tokens)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Err("paypal_personal_no_api".to_string())
-}
+// PayPal has no scan command: the Transaction Search API is business-tier only,
+// so personal accounts (the target user) can never call it. PayPal subscriptions
+// are discovered via Gmail receipt parsing and PayPal Activity CSV import. The
+// OAuth connect flow is retained purely as "Log In with PayPal" identity
+// verification, not as a data source.
 
 // ---- Renewal notifications ----
 
@@ -1347,74 +1325,85 @@ async fn extract_subscription_from_text(
     }
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    let specta_builder =
-        tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
-            list_subscriptions,
-            create_subscription,
-            update_subscription,
-            delete_subscription,
-            list_payment_methods,
-            create_payment_method,
-            update_payment_method,
-            delete_payment_method,
-            list_categories,
-            create_category,
-            update_category,
-            delete_category,
-            get_llm_config,
-            set_llm_config,
-            extract_subscription_from_text,
-            import_csv_text,
-            list_detection_events,
-            confirm_detection_event,
-            confirm_detection_event_with_overrides,
-            reject_detection_event,
-            bulk_reject_detection_events,
-            list_learned_senders,
-            delete_learned_sender,
-            refresh_exchange_rates,
-            list_exchange_rates,
-            get_default_currency,
-            set_default_currency,
-            get_user_locale,
-            set_user_locale,
-            get_translations,
-            save_translations,
-            translate_strings,
-            export_subscriptions_ics,
-            save_gmail_oauth_credentials,
-            get_gmail_oauth_credentials,
-            has_gmail_tokens,
-            disconnect_gmail,
-            cancel_oauth,
-            cancel_scan,
-            open_url,
-            start_gmail_oauth,
-            run_gmail_scan,
-            run_gmail_deep_scan,
-            save_paypal_oauth_credentials,
-            get_paypal_oauth_credentials,
-            has_paypal_tokens,
-            disconnect_paypal,
-            start_paypal_oauth,
-            run_paypal_scan,
-            check_renewals_now,
-        ]);
+/// Build the tauri-specta command registry. Extracted from [`run`] so the
+/// `export_bindings_round_trips` test can regenerate `bindings.ts` without
+/// standing up a windowed Tauri app.
+fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
+    tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
+        list_subscriptions,
+        create_subscription,
+        update_subscription,
+        delete_subscription,
+        list_payment_methods,
+        create_payment_method,
+        update_payment_method,
+        delete_payment_method,
+        list_categories,
+        create_category,
+        update_category,
+        delete_category,
+        get_llm_config,
+        set_llm_config,
+        extract_subscription_from_text,
+        import_csv_text,
+        list_detection_events,
+        confirm_detection_event,
+        confirm_detection_event_with_overrides,
+        reject_detection_event,
+        bulk_reject_detection_events,
+        list_learned_senders,
+        delete_learned_sender,
+        refresh_exchange_rates,
+        list_exchange_rates,
+        get_default_currency,
+        set_default_currency,
+        get_user_locale,
+        set_user_locale,
+        get_translations,
+        save_translations,
+        translate_strings,
+        export_subscriptions_ics,
+        save_gmail_oauth_credentials,
+        get_gmail_oauth_credentials,
+        has_gmail_tokens,
+        disconnect_gmail,
+        cancel_oauth,
+        cancel_scan,
+        open_url,
+        start_gmail_oauth,
+        run_gmail_scan,
+        run_gmail_deep_scan,
+        save_paypal_oauth_credentials,
+        get_paypal_oauth_credentials,
+        has_paypal_tokens,
+        disconnect_paypal,
+        start_paypal_oauth,
+        check_renewals_now,
+    ])
+}
 
-    #[cfg(debug_assertions)]
-    specta_builder
+/// Write the TypeScript bindings consumed by the SvelteKit frontend.
+///
+/// `DetectionEvent::parsed_payload` now carries a `#[specta(type = …)]`
+/// override, so the generated file is fully typed — no `@ts-nocheck` escape
+/// hatch and no synthesized `Value` alias required. The frontend imports these
+/// types and command wrappers directly.
+#[cfg(debug_assertions)]
+fn export_bindings(builder: &tauri_specta::Builder<tauri::Wry>) {
+    builder
         .export(
-            // specta 2.0.0-rc.24 emits inline references to `Value` (from
-            // serde_json::Value, used in DetectionEvent.parsed_payload) but
-            // doesn't synthesize the alias itself. Inject it via the header so
-            // svelte-check stops choking on the regenerated file.
-            specta_typescript::Typescript::default()
-                .header("// @ts-nocheck\nexport type Value = unknown;\n"),
+            specta_typescript::Typescript::default(),
             "../src/lib/bindings.ts",
         )
         .expect("failed to export typescript bindings");
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let specta_builder = specta_builder();
+
+    #[cfg(debug_assertions)]
+    export_bindings(&specta_builder);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -1461,4 +1450,22 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    /// Regenerate `bindings.ts` and assert the export is deterministic. Running
+    /// `cargo test -p kinketsu-app export_bindings_round_trips` refreshes the
+    /// committed bindings without a GUI build; a non-idempotent export (or a
+    /// panicking specta type) fails here.
+    #[test]
+    fn export_bindings_round_trips() {
+        super::export_bindings(&super::specta_builder());
+        let first = std::fs::read_to_string("../src/lib/bindings.ts")
+            .expect("bindings.ts written by first export");
+        super::export_bindings(&super::specta_builder());
+        let second = std::fs::read_to_string("../src/lib/bindings.ts")
+            .expect("bindings.ts written by second export");
+        assert_eq!(first, second, "binding export is not deterministic");
+    }
 }

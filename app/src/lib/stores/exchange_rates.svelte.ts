@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import { LOCALE_DEFAULT_CURRENCY, minorPerMajor, type ExchangeRate } from '$lib/types';
+import { LOCALE_DEFAULT_CURRENCY, minorPerMajor } from '$lib/constants';
+import type { ExchangeRate } from '$lib/bindings';
 
 class ExchangeRatesStore {
 	base = $state('JPY');

@@ -55,16 +55,57 @@ impl GeminiProvider {
         }
 
         let v: Value = resp.json().await?;
-        let content = v
-            .pointer("/candidates/0/content/parts/0/text")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::Llm("gemini: response missing candidate text".into()))?;
-        let data: Value = serde_json::from_str(content)
-            .map_err(|e| Error::Llm(format!("gemini: response text is not valid JSON: {e}")))?;
+        parse_response(&v)
+    }
+}
 
-        Ok(ExtractionResponse {
-            data,
-            confidence: None,
-        })
+/// Decode the structured JSON text from a Gemini `generateContent` envelope.
+/// Split out from [`GeminiProvider::extract`] for unit-testing without a live
+/// API call.
+fn parse_response(v: &Value) -> Result<ExtractionResponse> {
+    let content = v
+        .pointer("/candidates/0/content/parts/0/text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::Llm("gemini: response missing candidate text".into()))?;
+    let data: Value = serde_json::from_str(content)
+        .map_err(|e| Error::Llm(format!("gemini: response text is not valid JSON: {e}")))?;
+
+    Ok(ExtractionResponse {
+        data,
+        confidence: None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_candidate_part_text() {
+        let v = serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "role": "model",
+                    "parts": [{ "text": "{\"is_subscription\":true,\"service_name\":\"YouTube Premium\",\"amount_minor\":1280,\"currency\":\"JPY\"}" }]
+                }
+            }]
+        });
+        let resp = parse_response(&v).expect("candidate text present");
+        assert_eq!(resp.data["service_name"], "YouTube Premium");
+        assert_eq!(resp.data["amount_minor"], 1280);
+    }
+
+    #[test]
+    fn missing_candidate_is_error() {
+        let v = serde_json::json!({ "candidates": [] });
+        assert!(parse_response(&v).is_err());
+    }
+
+    #[test]
+    fn non_json_text_is_error() {
+        let v = serde_json::json!({
+            "candidates": [{ "content": { "parts": [{ "text": "not json" }] } }]
+        });
+        assert!(parse_response(&v).is_err());
     }
 }

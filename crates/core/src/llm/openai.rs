@@ -58,16 +58,57 @@ impl OpenAiProvider {
         }
 
         let v: Value = resp.json().await?;
-        let content = v
-            .pointer("/choices/0/message/content")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::Llm("openai: response missing message.content".into()))?;
-        let data: Value = serde_json::from_str(content)
-            .map_err(|e| Error::Llm(format!("openai: response content is not valid JSON: {e}")))?;
+        parse_response(&v)
+    }
+}
 
-        Ok(ExtractionResponse {
-            data,
-            confidence: None,
-        })
+/// Decode the JSON-schema content string from a Chat Completions envelope.
+/// Split out from [`OpenAiProvider::extract`] so it can be unit-tested without
+/// a live API call.
+fn parse_response(v: &Value) -> Result<ExtractionResponse> {
+    let content = v
+        .pointer("/choices/0/message/content")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::Llm("openai: response missing message.content".into()))?;
+    let data: Value = serde_json::from_str(content)
+        .map_err(|e| Error::Llm(format!("openai: response content is not valid JSON: {e}")))?;
+
+    Ok(ExtractionResponse {
+        data,
+        confidence: None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_json_schema_content_string() {
+        let v = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "{\"is_subscription\":true,\"service_name\":\"Spotify\",\"amount_minor\":980,\"currency\":\"JPY\"}"
+                }
+            }]
+        });
+        let resp = parse_response(&v).expect("content present");
+        assert_eq!(resp.data["service_name"], "Spotify");
+        assert_eq!(resp.data["amount_minor"], 980);
+    }
+
+    #[test]
+    fn missing_content_is_error() {
+        let v = serde_json::json!({ "choices": [{ "message": { "role": "assistant" } }] });
+        assert!(parse_response(&v).is_err());
+    }
+
+    #[test]
+    fn non_json_content_is_error() {
+        let v = serde_json::json!({
+            "choices": [{ "message": { "content": "I'm sorry, I can't help with that." } }]
+        });
+        assert!(parse_response(&v).is_err());
     }
 }

@@ -92,20 +92,56 @@ impl ClaudeProvider {
         }
 
         let v: Value = resp.json().await?;
-        let input = v
-            .get("content")
-            .and_then(Value::as_array)
-            .and_then(|arr| {
-                arr.iter()
-                    .find(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
-                    .and_then(|b| b.get("input"))
-                    .cloned()
-            })
-            .ok_or_else(|| Error::Llm("claude: response missing tool_use input".into()))?;
+        parse_response(&v)
+    }
+}
 
-        Ok(ExtractionResponse {
-            data: input,
-            confidence: None,
+/// Pull the `record_subscription` tool input out of a Claude `messages`
+/// response. Split from [`ClaudeProvider::extract`] so the envelope parsing can
+/// be unit-tested against canned payloads without a live API call.
+fn parse_response(v: &Value) -> Result<ExtractionResponse> {
+    let input = v
+        .get("content")
+        .and_then(Value::as_array)
+        .and_then(|arr| {
+            arr.iter()
+                .find(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+                .and_then(|b| b.get("input"))
+                .cloned()
         })
+        .ok_or_else(|| Error::Llm("claude: response missing tool_use input".into()))?;
+
+    Ok(ExtractionResponse {
+        data: input,
+        confidence: None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_tool_use_input_skipping_text_blocks() {
+        let v = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "Recording the subscription:"},
+                {"type": "tool_use", "name": TOOL_NAME, "input": {
+                    "is_subscription": true,
+                    "service_name": "Netflix",
+                    "amount_minor": 1980,
+                    "currency": "JPY"
+                }}
+            ]
+        });
+        let resp = parse_response(&v).expect("tool_use input present");
+        assert_eq!(resp.data["service_name"], "Netflix");
+        assert_eq!(resp.data["amount_minor"], 1980);
+    }
+
+    #[test]
+    fn missing_tool_use_block_is_error() {
+        let v = serde_json::json!({ "content": [{"type": "text", "text": "no tool call"}] });
+        assert!(parse_response(&v).is_err());
     }
 }

@@ -82,15 +82,7 @@ fn sanitize_llm_response(v: serde_json::Value) -> serde_json::Value {
         let lower = s.trim().to_ascii_lowercase();
         matches!(
             lower.as_str(),
-            "" | "<unknown>"
-                | "unknown"
-                | "n/a"
-                | "na"
-                | "?"
-                | "-"
-                | "null"
-                | "none"
-                | "undefined"
+            "" | "<unknown>" | "unknown" | "n/a" | "na" | "?" | "-" | "null" | "none" | "undefined"
         )
     }
     match v {
@@ -108,9 +100,7 @@ fn sanitize_llm_response(v: serde_json::Value) -> serde_json::Value {
                 .collect();
             Value::Object(cleaned)
         }
-        Value::Array(arr) => {
-            Value::Array(arr.into_iter().map(sanitize_llm_response).collect())
-        }
+        Value::Array(arr) => Value::Array(arr.into_iter().map(sanitize_llm_response).collect()),
         other => other,
     }
 }
@@ -186,11 +176,7 @@ pub async fn extract_many_from_text(
         let cleaned = sanitize_llm_response(item.clone());
         // Honour the is_subscription gate when present; bulk mode also drops
         // anything the LLM marked false.
-        if cleaned
-            .get("is_subscription")
-            .and_then(|v| v.as_bool())
-            == Some(false)
-        {
+        if cleaned.get("is_subscription").and_then(|v| v.as_bool()) == Some(false) {
             continue;
         }
         if let Ok(hint) = serde_json::from_value::<ParsedSubscriptionHint>(cleaned) {

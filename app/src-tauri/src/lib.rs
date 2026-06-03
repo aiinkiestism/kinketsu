@@ -4,9 +4,9 @@
 //! SvelteKit frontend calls via `@tauri-apps/api/core::invoke`.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 use chrono::Datelike;
 
@@ -56,7 +56,10 @@ fn normalize_sender(raw: &str) -> String {
 
 fn arm_oauth_cancel(state: &AppState) -> oneshot::Receiver<()> {
     let (tx, rx) = oneshot::channel::<()>();
-    let mut guard = state.oauth_cancel.lock().expect("oauth_cancel mutex poisoned");
+    let mut guard = state
+        .oauth_cancel
+        .lock()
+        .expect("oauth_cancel mutex poisoned");
     if let Some(prev) = guard.take() {
         // Best-effort: receiver may already be dropped if the previous flow
         // finished; that's fine and surfaces as `Err(())` we ignore.
@@ -356,8 +359,7 @@ async fn run_gmail_scan(
         .collect();
 
     // Stage 1: tight, precision-favored Gmail keywords.
-    let query =
-        parsers::gmail::build_query_for_range(&months, parsers::gmail::ScanMode::Fast);
+    let query = parsers::gmail::build_query_for_range(&months, parsers::gmail::ScanMode::Fast);
     let msg_ids = parsers::gmail::list_message_ids(&access_token, &query)
         .await
         .map_err(|e| e.to_string())?;
@@ -409,7 +411,13 @@ async fn run_gmail_scan(
             .is_some()
         {
             skipped_seen += 1;
-            emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
+            emit_progress(
+                idx + 1,
+                created,
+                skipped_classified,
+                skipped_seen,
+                skipped_blocked,
+            );
             continue;
         }
 
@@ -418,7 +426,13 @@ async fn run_gmail_scan(
             Err(e) => {
                 log::warn!("gmail scan: fetch_message({id}) failed: {e}");
                 skipped_fetch += 1;
-                emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
+                emit_progress(
+                    idx + 1,
+                    created,
+                    skipped_classified,
+                    skipped_seen,
+                    skipped_blocked,
+                );
                 continue;
             }
         };
@@ -433,7 +447,13 @@ async fn run_gmail_scan(
         {
             log::info!("gmail scan: sender {s} on blocklist, skipping {id}");
             skipped_blocked += 1;
-            emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
+            emit_progress(
+                idx + 1,
+                created,
+                skipped_classified,
+                skipped_seen,
+                skipped_blocked,
+            );
             continue;
         }
 
@@ -442,7 +462,13 @@ async fn run_gmail_scan(
             None => {
                 log::warn!("gmail scan: no text body in message {id}");
                 skipped_body += 1;
-                emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
+                emit_progress(
+                    idx + 1,
+                    created,
+                    skipped_classified,
+                    skipped_seen,
+                    skipped_blocked,
+                );
                 continue;
             }
         };
@@ -452,7 +478,13 @@ async fn run_gmail_scan(
             Err(e) => {
                 log::warn!("gmail scan: LLM extract for {id} failed: {e}");
                 skipped_extract += 1;
-                emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
+                emit_progress(
+                    idx + 1,
+                    created,
+                    skipped_classified,
+                    skipped_seen,
+                    skipped_blocked,
+                );
                 continue;
             }
         };
@@ -460,7 +492,13 @@ async fn run_gmail_scan(
         // LLM gate: None means "this isn't a recurring subscription".
         let Some(hint) = hint_opt else {
             skipped_classified += 1;
-            emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
+            emit_progress(
+                idx + 1,
+                created,
+                skipped_classified,
+                skipped_seen,
+                skipped_blocked,
+            );
             continue;
         };
 
@@ -489,7 +527,13 @@ async fn run_gmail_scan(
             .map_err(|e| e.to_string())?;
 
         created += 1;
-        emit_progress(idx + 1, created, skipped_classified, skipped_seen, skipped_blocked);
+        emit_progress(
+            idx + 1,
+            created,
+            skipped_classified,
+            skipped_seen,
+            skipped_blocked,
+        );
     }
 
     log::info!(
@@ -543,8 +587,7 @@ async fn run_gmail_deep_scan(
         })
         .collect();
 
-    let query =
-        parsers::gmail::build_query_for_range(&months, parsers::gmail::ScanMode::Deep);
+    let query = parsers::gmail::build_query_for_range(&months, parsers::gmail::ScanMode::Deep);
     let msg_ids = parsers::gmail::list_message_ids(&access_token, &query)
         .await
         .map_err(|e| e.to_string())?;
@@ -606,9 +649,7 @@ async fn run_gmail_deep_scan(
     // Phase 2 — LLM extract only messages from senders with ≥2 months hits.
     let candidates: Vec<&Header> = headers
         .iter()
-        .filter(|(_, sender, _)| {
-            sender.as_ref().is_some_and(|s| recurring.contains(s))
-        })
+        .filter(|(_, sender, _)| sender.as_ref().is_some_and(|s| recurring.contains(s)))
         .collect();
     let cand_total = candidates.len();
 
@@ -1258,8 +1299,7 @@ async fn bulk_reject_detection_events(
             continue;
         }
         if let Some(sender) = ev.and_then(|e| e.sender) {
-            let _ =
-                db::learned_senders::upsert(&state.pool, &sender, LearnedDecision::Block).await;
+            let _ = db::learned_senders::upsert(&state.pool, &sender, LearnedDecision::Block).await;
         }
         rejected += 1;
     }
@@ -1278,10 +1318,7 @@ async fn list_learned_senders(state: State<'_, AppState>) -> Result<Vec<LearnedS
 
 #[tauri::command]
 #[specta::specta]
-async fn delete_learned_sender(
-    state: State<'_, AppState>,
-    sender: String,
-) -> Result<(), String> {
+async fn delete_learned_sender(state: State<'_, AppState>, sender: String) -> Result<(), String> {
     db::learned_senders::delete(&state.pool, &sender)
         .await
         .map_err(|e| e.to_string())

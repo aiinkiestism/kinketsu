@@ -28,15 +28,13 @@ static EMAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 // Card-like digit runs (13–19 digits) with optional space / hyphen separators.
 // Luhn validation at use-site drops long order numbers that aren't card PANs.
-static CARD_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:\d[ \-]?){12,18}\d\b").expect("card regex")
-});
+static CARD_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b(?:\d[ \-]?){12,18}\d\b").expect("card regex"));
 
 // JP phone: 0X-XXXX-XXXX style. \b anchored so we don't slice into the
 // middle of an IBAN digit group or other digit sequence.
-static JP_PHONE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b0\d{1,4}[ \-]\d{1,4}[ \-]\d{3,4}\b").expect("jp phone regex")
-});
+static JP_PHONE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b0\d{1,4}[ \-]\d{1,4}[ \-]\d{3,4}\b").expect("jp phone regex"));
 
 // International phone with explicit "+" country code.
 static INTL_PHONE_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -74,7 +72,7 @@ fn luhn_ok(digits: &str) -> bool {
         sum += v;
         alt = !alt;
     }
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 fn digits_only(s: &str) -> String {

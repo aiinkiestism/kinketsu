@@ -1,6 +1,8 @@
 //! Gmail integration: query construction, message listing, body extraction,
 //! and one-shot extraction via the configured LLM.
 
+use std::sync::LazyLock;
+
 use base64::Engine;
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -11,6 +13,17 @@ use crate::llm::LlmClient;
 use crate::{Error, Result};
 
 const API_BASE: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
+
+/// One shared HTTP client for all Gmail calls — reuses the connection pool
+/// across the hundreds of per-message fetches a scan makes, instead of paying
+/// a fresh TLS handshake per request.
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+
+/// Gmail's built-in ML category for order / receipt / purchase confirmation
+/// mail. ANDed into the query (opt-in) to lean on Google's classifier as an
+/// extra noise filter. Off by default — it can silently drop domestic /
+/// non-English subscription mail the classifier misses.
+const PURCHASES_FILTER: &str = " category:purchases";
 
 /// Stage 1 (default) — high precision query. Only subscription-specific
 /// vocabulary so one-off Starbucks / Uber Eats / retail receipts don't enter
@@ -63,13 +76,15 @@ fn last_day_of_month(year: i32, month: u32) -> u32 {
 
 /// Build a Gmail search query for the configured keywords across the supplied
 /// year/month ranges. Each month becomes an `after:Y/M/01 before:Y/M/last_day`
-/// clause, ORed together. Empty range omits the date filter.
+/// clause, ORed together. Empty range omits the date filter. When
+/// `use_purchases` is set, restricts to Gmail's `category:purchases` ML label.
 #[must_use]
-pub fn build_query_for_range(months: &[YearMonth], mode: ScanMode) -> String {
+pub fn build_query_for_range(months: &[YearMonth], mode: ScanMode, use_purchases: bool) -> String {
     let keywords = match mode {
         ScanMode::Fast => TIGHT_KEYWORDS,
         ScanMode::Deep => BROAD_KEYWORDS,
     };
+    let purchases = if use_purchases { PURCHASES_FILTER } else { "" };
     let mut date_clauses = Vec::new();
     for ym in months {
         let last = last_day_of_month(ym.year, ym.month);
@@ -79,9 +94,9 @@ pub fn build_query_for_range(months: &[YearMonth], mode: ScanMode) -> String {
         ));
     }
     if date_clauses.is_empty() {
-        keywords.to_string()
+        format!("{keywords}{purchases}")
     } else {
-        format!("{keywords} ({})", date_clauses.join(" OR "))
+        format!("{keywords}{purchases} ({})", date_clauses.join(" OR "))
     }
 }
 
@@ -89,12 +104,28 @@ fn url_encode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 
-/// List message IDs matching `query`. Paginates until exhausted or a 500-row
-/// safety cap is reached.
-pub async fn list_message_ids(access_token: &str, query: &str) -> Result<Vec<String>> {
-    const HARD_CAP: usize = 500;
+/// Result of listing message IDs for a query.
+pub struct MessageList {
+    /// IDs actually collected (capped at `max_results`).
+    pub ids: Vec<String>,
+    /// Gmail's `resultSizeEstimate` for the whole query — a rough total that
+    /// can exceed `ids.len()` when the cap kicks in. Used by the scan preview
+    /// to show "≈ N matched" without paginating the whole mailbox.
+    pub estimate: u32,
+}
+
+/// List message IDs matching `query`, paginating until exhausted or
+/// `max_results` is reached. Also returns Gmail's overall result-size estimate
+/// (read from the first page) so callers can show a total even when capped.
+pub async fn list_message_ids(
+    access_token: &str,
+    query: &str,
+    max_results: usize,
+) -> Result<MessageList> {
     let mut out: Vec<String> = Vec::new();
+    let mut estimate: u32 = 0;
     let mut page_token: Option<String> = None;
+    let mut first_page = true;
 
     loop {
         let mut url = format!("{API_BASE}/messages?q={}&maxResults=100", url_encode(query));
@@ -102,23 +133,26 @@ pub async fn list_message_ids(access_token: &str, query: &str) -> Result<Vec<Str
             url.push_str("&pageToken=");
             url.push_str(pt);
         }
-        let resp = reqwest::Client::new()
-            .get(&url)
-            .bearer_auth(access_token)
-            .send()
-            .await?;
+        let resp = CLIENT.get(&url).bearer_auth(access_token).send().await?;
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(Error::Parser(format!("gmail list {status}: {text}")));
         }
         let v: Value = resp.json().await?;
+        if first_page {
+            estimate = v
+                .get("resultSizeEstimate")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as u32;
+            first_page = false;
+        }
         if let Some(arr) = v.get("messages").and_then(Value::as_array) {
             for m in arr {
                 if let Some(id) = m.get("id").and_then(Value::as_str) {
                     out.push(id.to_string());
-                    if out.len() >= HARD_CAP {
-                        return Ok(out);
+                    if out.len() >= max_results {
+                        return Ok(MessageList { ids: out, estimate });
                     }
                 }
             }
@@ -131,16 +165,12 @@ pub async fn list_message_ids(access_token: &str, query: &str) -> Result<Vec<Str
             break;
         }
     }
-    Ok(out)
+    Ok(MessageList { ids: out, estimate })
 }
 
 pub async fn fetch_message(access_token: &str, message_id: &str) -> Result<Value> {
     let url = format!("{API_BASE}/messages/{message_id}?format=full");
-    let resp = reqwest::Client::new()
-        .get(&url)
-        .bearer_auth(access_token)
-        .send()
-        .await?;
+    let resp = CLIENT.get(&url).bearer_auth(access_token).send().await?;
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
@@ -222,12 +252,27 @@ fn strip_html(s: &str) -> String {
 
 /// Trim a body to the LLM-context limit while keeping the head of the message
 /// (where receipts usually surface the amount + service name).
-fn trim_body(body: String) -> String {
+#[must_use]
+pub fn trim_body(body: String) -> String {
     if body.len() <= BODY_CHAR_LIMIT {
         body
     } else {
         body.chars().take(BODY_CHAR_LIMIT).collect()
     }
+}
+
+/// Pull a clean lowercased email address out of an RFC-5322 `From` header
+/// value (`Name <[email protected]>` → `[email protected]`). Returns the trimmed
+/// lowercase original if there's no angle-bracketed address.
+#[must_use]
+pub fn normalize_sender(raw: &str) -> String {
+    if let Some(start) = raw.rfind('<')
+        && let Some(end_rel) = raw[start..].find('>')
+    {
+        let inner = &raw[start + 1..start + end_rel];
+        return inner.trim().to_ascii_lowercase();
+    }
+    raw.trim().to_ascii_lowercase()
 }
 
 pub fn message_ref_from(message: &Value, id: &str) -> GmailMessageRef {

@@ -251,6 +251,45 @@ const EN: Record<string, string> = {
 	'range.this_year': 'This year',
 	'range.last_year': 'Last year',
 
+	// Scan tooltips, options and preview
+	'inbox.scan_run_hint':
+		'Tight keywords, precision-first. Picks up the month’s renewal and charge emails, so it works even for a single month. Start here.',
+	'inbox.opts_heading': 'Limits & filters',
+	'inbox.opts_max_fetch': 'Max emails to fetch',
+	'inbox.opts_max_fetch_hint':
+		'Upper bound on how many matching emails to download and screen before the LLM step.',
+	'inbox.opts_max_llm': 'Max LLM calls',
+	'inbox.opts_max_llm_hint':
+		'Upper bound on how many screened emails get sent to the LLM — this is the part that costs money.',
+	'inbox.opts_purchases': 'Restrict to Gmail “Purchases”',
+	'inbox.opts_purchases_hint':
+		'Lean on Gmail’s own ML to pre-filter to receipts/orders. Faster and cheaper, but can miss non-English or domestic subscription mail. Off by default.',
+	'inbox.preview': 'Preview',
+	'inbox.previewing': 'Estimating…',
+	'inbox.preview_matched': '≈ {count} emails match',
+	'inbox.preview_llm_one': '1 will be sent to the LLM',
+	'inbox.preview_llm_other': '{count} will be sent to the LLM',
+	'inbox.preview_excluded':
+		'Excluded: {seen} already seen · {blocked} blocked · {noamount} no amount{recurrence}',
+	'inbox.preview_recurrence_suffix': ' · {count} non-recurring',
+	'inbox.preview_tokens': '≈ {input} input tokens',
+	'inbox.preview_cost': 'Estimated cost: {low} – {high}',
+	'inbox.preview_cost_local': 'Local provider — no API cost.',
+	'inbox.preview_cost_note': 'Estimate: input tokens approximated, output capped. Prices are list rates.',
+	'inbox.preview_truncated':
+		'Capped at your “Max LLM calls” limit — raise it to cover everything.',
+
+	'dashboard.last_scan_heading': 'Last scan',
+	'dashboard.last_scan_never': 'No scan yet — run one from the Inbox.',
+	'dashboard.last_scan_summary': '{matched} matched · {llm} to LLM · {created} new',
+	'dashboard.last_scan_mode_fast': 'Quick',
+	'dashboard.last_scan_mode_deep': 'Deep',
+	'dashboard.review_heading': 'Needs review',
+	'dashboard.review_empty': 'Nothing waiting for review.',
+	'dashboard.review_view_all': 'Review all',
+	'dashboard.review_count_one': '1 detection to review',
+	'dashboard.review_count_other': '{count} detections to review',
+
 	// Backend notification templates — keyed by their literal text so the
 	// Rust-side notify_renewals can index the same translation cache.
 	'{name} renews soon': '{name} renews soon',

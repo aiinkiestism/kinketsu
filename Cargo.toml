@@ -53,6 +53,9 @@ url = "2"
 # PII redaction patterns
 regex = "1"
 
+# Concurrency combinators (bounded buffer_unordered for the scan pipeline)
+futures = "0.3"
+
 # Database
 sqlx = { version = "0.8", default-features = false, features = [
     "sqlite",

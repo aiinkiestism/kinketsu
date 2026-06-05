@@ -14,7 +14,9 @@ dist/
 
 # Tauri
 src-tauri/target/
-src-tauri/gen/
+# Generated native projects + specta schemas (the gen/ dir lives under app/).
+# Anchored patterns above missed app/src-tauri/gen/, so match it at any depth.
+**/src-tauri/gen/
 
 # Env
 .env

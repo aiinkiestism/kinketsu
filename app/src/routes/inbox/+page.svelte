@@ -8,8 +8,15 @@
 	import { i18n, t, tn } from '$lib/i18n.svelte';
 	import MonthRangeSelect from '$lib/components/MonthRangeSelect.svelte';
 	import ErrorDialog from '$lib/components/ErrorDialog.svelte';
+	import Tooltip from '$lib/components/Tooltip.svelte';
 	import { CURRENCIES } from '$lib/constants';
-	import type { BillingCycle, DetectionEvent, DetectionSource, YearMonthDto } from '$lib/bindings';
+	import type {
+		BillingCycle,
+		DetectionEvent,
+		DetectionSource,
+		ScanOptsDto,
+		YearMonthDto
+	} from '$lib/bindings';
 
 	type ScanErrorInfo = {
 		title: string;
@@ -114,6 +121,65 @@
 	let scanRange = $state<YearMonthDto[]>([]);
 	let scanFeedback = $state<string | null>(null);
 
+	// Scan limits & filters, set before scanning.
+	let maxFetch = $state(500);
+	let maxLlm = $state(100);
+	let usePurchases = $state(false);
+	// Which mode the most recent preview estimated, so the panel can label it.
+	let previewMode = $state<'fast' | 'deep'>('fast');
+
+	function currentOpts(): ScanOptsDto {
+		return { max_fetch: maxFetch, max_llm: maxLlm, use_purchases: usePurchases };
+	}
+
+	function scanPreconditions(): boolean {
+		scanFeedback = null;
+		if (!gmail.credentials) {
+			scanFeedback = t('inbox.scan_needs_creds');
+			return false;
+		}
+		if (!gmail.connected) {
+			scanFeedback = t('inbox.scan_needs_connection');
+			return false;
+		}
+		if (!llmConfig.current) {
+			scanFeedback = t('inbox.scan_needs_llm');
+			return false;
+		}
+		if (scanRange.length === 0) {
+			scanFeedback = t('inbox.scan_needs_range');
+			return false;
+		}
+		return true;
+	}
+
+	async function handlePreview(deep: boolean) {
+		if (!scanPreconditions()) return;
+		previewMode = deep ? 'deep' : 'fast';
+		try {
+			await gmail.preview(scanRange, deep, currentOpts());
+		} catch (e) {
+			const raw = gmail.error ?? String(e);
+			if (raw.includes('scan cancelled')) {
+				scanFeedback = t('inbox.scan_cancelled');
+			} else {
+				openErrorDialog(parseScanError(raw));
+			}
+		}
+	}
+
+	function fmtUsd(v: number): string {
+		try {
+			return new Intl.NumberFormat(i18n.bcp47, {
+				style: 'currency',
+				currency: 'USD',
+				maximumFractionDigits: v > 0 && v < 1 ? 4 : 2
+			}).format(v);
+		} catch {
+			return `$${v.toFixed(2)}`;
+		}
+	}
+
 	async function handleConnectGmail() {
 		try {
 			await gmail.connect();
@@ -126,27 +192,11 @@
 	}
 
 	async function runScanCommon(deep: boolean) {
-		scanFeedback = null;
-		if (!gmail.credentials) {
-			scanFeedback = t('inbox.scan_needs_creds');
-			return;
-		}
-		if (!gmail.connected) {
-			scanFeedback = t('inbox.scan_needs_connection');
-			return;
-		}
-		if (!llmConfig.current) {
-			scanFeedback = t('inbox.scan_needs_llm');
-			return;
-		}
-		if (scanRange.length === 0) {
-			scanFeedback = t('inbox.scan_needs_range');
-			return;
-		}
+		if (!scanPreconditions()) return;
 		try {
 			const created = deep
-				? await gmail.runDeepScan(scanRange)
-				: await gmail.runScan(scanRange);
+				? await gmail.runDeepScan(scanRange, currentOpts())
+				: await gmail.runScan(scanRange, currentOpts());
 			if (created === 0) {
 				scanFeedback = t('inbox.scan_complete_zero');
 			} else {
@@ -332,8 +382,30 @@
 		<h2>{t('inbox.range_heading')}</h2>
 		<p class="muted desc-small">{t('inbox.range_description')}</p>
 		<MonthRangeSelect bind:value={scanRange} />
+
+		<div class="opts-grid">
+			<label class="opt">
+				<span class="opt-label"
+					>{t('inbox.opts_max_fetch')}<Tooltip text={t('inbox.opts_max_fetch_hint')} /></span
+				>
+				<input type="number" min="1" step="50" bind:value={maxFetch} />
+			</label>
+			<label class="opt">
+				<span class="opt-label"
+					>{t('inbox.opts_max_llm')}<Tooltip text={t('inbox.opts_max_llm_hint')} /></span
+				>
+				<input type="number" min="1" step="10" bind:value={maxLlm} />
+			</label>
+			<label class="opt opt-check">
+				<input type="checkbox" bind:checked={usePurchases} />
+				<span class="opt-label"
+					>{t('inbox.opts_purchases')}<Tooltip text={t('inbox.opts_purchases_hint')} /></span
+				>
+			</label>
+		</div>
+
 		<div class="scan-actions">
-			{#if gmail.scanning}
+			{#if gmail.scanning || gmail.previewing}
 				<button type="button" class="scan-btn running" disabled>
 					{#if gmail.progress}
 						{#if gmail.progress.phase === 'indexing'}
@@ -349,42 +421,107 @@
 							})}
 						{/if}
 					{:else}
-						{t('inbox.scan_running')}
+						{gmail.previewing ? t('inbox.previewing') : t('inbox.scan_running')}
 					{/if}
 				</button>
 				<button type="button" class="scan-cancel" onclick={handleCancelScan}>
 					{t('subs.cancel')}
 				</button>
 			{:else}
-				<button
-					type="button"
-					class="scan-btn"
-					onclick={handleRunScan}
-					disabled={scanRange.length === 0}
-				>
-					{t('inbox.scan_run')}
-				</button>
-				<button
-					type="button"
-					class="scan-btn-deep"
-					onclick={handleRunDeepScan}
-					disabled={scanRange.length === 0}
-					title={t('inbox.scan_run_deep_hint')}
-				>
-					{t('inbox.scan_run_deep')}
-				</button>
+				<div class="scan-group">
+					<button
+						type="button"
+						class="scan-preview"
+						onclick={() => handlePreview(false)}
+						disabled={scanRange.length === 0}
+					>
+						{t('inbox.preview')}
+					</button>
+					<button
+						type="button"
+						class="scan-btn"
+						onclick={handleRunScan}
+						disabled={scanRange.length === 0}
+					>
+						{t('inbox.scan_run')}
+					</button>
+					<Tooltip text={t('inbox.scan_run_hint')} />
+				</div>
+				<div class="scan-group">
+					<button
+						type="button"
+						class="scan-preview"
+						onclick={() => handlePreview(true)}
+						disabled={scanRange.length === 0}
+					>
+						{t('inbox.preview')}
+					</button>
+					<button
+						type="button"
+						class="scan-btn-deep"
+						onclick={handleRunDeepScan}
+						disabled={scanRange.length === 0}
+					>
+						{t('inbox.scan_run_deep')}
+					</button>
+					<Tooltip text={t('inbox.scan_run_deep_hint')} />
+				</div>
 			{/if}
 			{#if scanFeedback}
 				<span class="scan-feedback">{scanFeedback}</span>
 			{/if}
 		</div>
-		{#if gmail.scanning && gmail.progress}
+
+		{#if (gmail.scanning || gmail.previewing) && gmail.progress}
 			<p class="scan-detail muted small">
 				{t('inbox.scan_progress_detail', {
 					classified: gmail.progress.skippedClassified,
 					seen: gmail.progress.skippedSeen
 				})}
 			</p>
+		{/if}
+
+		{#if gmail.estimate && !gmail.scanning && !gmail.previewing}
+			{@const est = gmail.estimate}
+			<div class="estimate glass-subtle">
+				<div class="est-head">
+					<strong>{t('inbox.preview_matched', { count: est.matched_estimate })}</strong>
+					<span class="est-mode"
+						>{previewMode === 'deep' ? t('inbox.scan_run_deep') : t('inbox.scan_run')}</span
+					>
+				</div>
+				<p class="est-targets">{tn('inbox.preview_llm', est.llm_targets)}</p>
+				<p class="muted small">
+					{t('inbox.preview_excluded', {
+						seen: est.skipped_seen,
+						blocked: est.skipped_blocked,
+						noamount: est.skipped_no_amount,
+						recurrence:
+							est.skipped_recurrence > 0
+								? t('inbox.preview_recurrence_suffix', { count: est.skipped_recurrence })
+								: ''
+					})}
+				</p>
+				{#if est.truncated_by_max_llm}
+					<p class="small warn">{t('inbox.preview_truncated')}</p>
+				{/if}
+				<p class="est-cost">
+					{#if est.is_local}
+						{t('inbox.preview_cost_local')}
+					{:else}
+						{t('inbox.preview_cost', {
+							low: fmtUsd(est.cost_low_usd),
+							high: fmtUsd(est.cost_high_usd)
+						})}
+					{/if}
+				</p>
+				<p class="muted small">
+					{t('inbox.preview_tokens', { input: est.input_tokens.toLocaleString() })} · {est.provider}/{est.model}
+				</p>
+				{#if !est.is_local}
+					<p class="muted small">{t('inbox.preview_cost_note')}</p>
+				{/if}
+			</div>
 		{/if}
 	</section>
 
@@ -675,6 +812,116 @@
 	}
 	.scan-detail {
 		margin: 0.5rem 0 0;
+	}
+
+	.opts-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.85rem 1.25rem;
+		margin-top: 1rem;
+	}
+	.opt {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		font-size: 0.85rem;
+		color: var(--kk-text-muted);
+	}
+	.opt-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.15rem;
+	}
+	.opt input[type='number'] {
+		padding: 0.45rem 0.6rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		background: var(--kk-surface-2);
+		color: var(--kk-text-primary);
+		font-size: 0.9rem;
+		font-family: inherit;
+		width: 8rem;
+	}
+	.opt-check {
+		flex-direction: row;
+		align-items: center;
+		gap: 0.5rem;
+		align-self: end;
+	}
+	.opt-check input {
+		width: 1rem;
+		height: 1rem;
+		cursor: pointer;
+	}
+	.scan-group {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding-right: 0.6rem;
+	}
+	.scan-group + .scan-group {
+		border-left: 1px solid var(--kk-stroke);
+		padding-left: 0.85rem;
+	}
+	.scan-preview {
+		padding: 0.6rem 1rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		background: var(--kk-surface-2);
+		color: var(--kk-text-primary);
+		font-weight: 600;
+		cursor: pointer;
+		font-family: inherit;
+	}
+	.scan-preview:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.scan-preview:hover:not(:disabled) {
+		background: var(--kk-surface-3, var(--kk-surface-2));
+		border-color: var(--color-accent-sora);
+	}
+
+	.estimate {
+		margin-top: 1rem;
+		padding: 1rem 1.25rem;
+		border-radius: var(--kk-radius-md);
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+	.est-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+	.est-head strong {
+		font-size: 1.05rem;
+	}
+	.est-mode {
+		font-size: 0.7rem;
+		padding: 0.15rem 0.5rem;
+		border-radius: 999px;
+		background: var(--kk-surface-2);
+		border: 1px solid var(--kk-stroke);
+		color: var(--kk-text-muted);
+	}
+	.est-targets {
+		margin: 0;
+		font-size: 0.95rem;
+		font-weight: 600;
+		color: var(--color-accent-sora);
+	}
+	.estimate p {
+		margin: 0;
+	}
+	.est-cost {
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+	}
+	.warn {
+		color: var(--color-accent-yuzu);
 	}
 
 	.list-section {

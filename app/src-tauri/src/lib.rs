@@ -3,12 +3,10 @@
 //! Holds the SQLite pool in app state and exposes the v0.1 commands the
 //! SvelteKit frontend calls via `@tauri-apps/api/core::invoke`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-
-use chrono::Datelike;
 
 use tokio::sync::oneshot;
 
@@ -39,19 +37,9 @@ pub struct AppState {
     /// checks this at every iteration so the UI's Cancel button can bail
     /// out without waiting for the next LLM round-trip to finish.
     pub scan_cancel: Arc<AtomicBool>,
-}
-
-/// Pull a clean lowercased email address out of an RFC-5322 `From` header
-/// value (`Name <[email protected]>` → `[email protected]`). Returns the trimmed
-/// lowercase original if there's no angle-bracketed address.
-fn normalize_sender(raw: &str) -> String {
-    if let Some(start) = raw.rfind('<')
-        && let Some(end_rel) = raw[start..].find('>')
-    {
-        let inner = &raw[start + 1..start + end_rel];
-        return inner.trim().to_ascii_lowercase();
-    }
-    raw.trim().to_ascii_lowercase()
+    /// Survivors from the most recent scan preview, cached so a follow-up scan
+    /// with identical parameters skips re-fetching every message body.
+    pub last_preview: StdMutex<Option<PreviewCache>>,
 }
 
 fn arm_oauth_cancel(state: &AppState) -> oneshot::Receiver<()> {
@@ -317,441 +305,294 @@ pub struct YearMonthDto {
     pub month: u32,
 }
 
+/// Per-scan tuning the UI sends alongside the month range. `None` caps fall
+/// back to the pipeline defaults.
+#[derive(Debug, Clone, serde::Deserialize, specta::Type)]
+pub struct ScanOptsDto {
+    /// Max messages to fetch + screen (replaces the old hard 500 cap).
+    pub max_fetch: Option<u32>,
+    /// Max survivors sent to the LLM — the cost-bearing knob.
+    pub max_llm: Option<u32>,
+    /// Restrict the Gmail query to `category:purchases`.
+    pub use_purchases: bool,
+}
+
+/// A preview's screened survivors, cached so a follow-up scan with the same
+/// parameters skips re-fetching every message body.
+pub struct PreviewCache {
+    signature: String,
+    screen: parsers::scan::ScreenResult,
+}
+
+fn build_scan_opts(deep: bool, dto: &ScanOptsDto) -> parsers::scan::ScanOptions {
+    let mode = if deep {
+        parsers::gmail::ScanMode::Deep
+    } else {
+        parsers::gmail::ScanMode::Fast
+    };
+    let max_fetch = dto
+        .max_fetch
+        .map_or(parsers::scan::DEFAULT_MAX_FETCH, |v| v as usize);
+    let max_llm = dto
+        .max_llm
+        .map_or(parsers::scan::DEFAULT_MAX_LLM, |v| v as usize);
+    parsers::scan::ScanOptions::new(mode, max_fetch, max_llm, dto.use_purchases)
+}
+
+/// Stable key identifying a scan's inputs, so a cached preview is only reused
+/// for an identical follow-up scan.
+fn scan_signature(range: &[YearMonthDto], opts: &parsers::scan::ScanOptions) -> String {
+    let mut s = String::new();
+    for ym in range {
+        s.push_str(&format!("{}-{};", ym.year, ym.month));
+    }
+    s.push_str(&format!(
+        "mode={:?};fetch={};llm={};pur={}",
+        opts.mode, opts.max_fetch, opts.max_llm, opts.use_purchases
+    ));
+    s
+}
+
+fn to_months(range: Vec<YearMonthDto>) -> Vec<parsers::gmail::YearMonth> {
+    range
+        .into_iter()
+        .map(|d| parsers::gmail::YearMonth {
+            year: d.year,
+            month: d.month,
+        })
+        .collect()
+}
+
+/// Refresh + persist the Gmail access token, returning a usable bearer token.
+async fn ensure_gmail_token(state: &AppState) -> Result<String, String> {
+    let creds: OAuthCredentials =
+        db::settings::get(&state.pool, db::settings::keys::GMAIL_OAUTH_CREDS)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Gmail OAuth credentials not configured".to_string())?;
+    let mut tokens: Tokens = db::settings::get(&state.pool, db::settings::keys::GMAIL_TOKENS)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Gmail not connected — click Connect Gmail first".to_string())?;
+    let access_token = oauth::ensure_access_token(&creds, &mut tokens)
+        .await
+        .map_err(|e| e.to_string())?;
+    db::settings::set(&state.pool, db::settings::keys::GMAIL_TOKENS, &tokens)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(access_token)
+}
+
+async fn load_llm_config(state: &AppState) -> Result<LlmConfig, String> {
+    db::settings::get(&state.pool, db::settings::keys::LLM_CONFIG)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no LLM provider configured".to_string())
+}
+
+fn llm_provider_model(cfg: &LlmConfig) -> (String, String) {
+    match cfg {
+        LlmConfig::Claude { model, .. } => ("claude".into(), model.clone()),
+        LlmConfig::OpenAi { model, .. } => ("openai".into(), model.clone()),
+        LlmConfig::Gemini { model, .. } => ("gemini".into(), model.clone()),
+        LlmConfig::Ollama { model, .. } => ("ollama".into(), model.clone()),
+        LlmConfig::LmStudio { model, .. } => ("lmstudio".into(), model.clone()),
+    }
+}
+
+/// A `scan-progress` emitter for one pass. Returns a fresh `FnMut` each call so
+/// the screen and extract passes don't share a moved closure.
+fn make_scan_emit(app: &AppHandle) -> impl FnMut(&parsers::scan::Progress) {
+    let app = app.clone();
+    move |p: &parsers::scan::Progress| {
+        let _ = app.emit(
+            "scan-progress",
+            serde_json::json!({
+                "processed": p.processed,
+                "total": p.total,
+                "created": p.created,
+                "skippedClassified": p.skipped_classified,
+                "skippedSeen": p.skipped_seen,
+                "skippedBlocked": p.skipped_blocked,
+                "phase": p.phase,
+            }),
+        );
+    }
+}
+
+/// Take a cached preview if it matches `signature`, consuming it so a repeat
+/// scan re-fetches fresh next time.
+fn take_cached_screen(state: &AppState, signature: &str) -> Option<parsers::scan::ScreenResult> {
+    let mut guard = state.last_preview.lock().ok()?;
+    if guard.as_ref().is_some_and(|c| c.signature == signature) {
+        return guard.take().map(|c| c.screen);
+    }
+    None
+}
+
+/// Shared driver for the fast and deep Gmail scans: screen (or reuse a matching
+/// preview), extract via the LLM, persist a summary, return the created count.
+async fn do_scan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    range: Vec<YearMonthDto>,
+    deep: bool,
+    opts: ScanOptsDto,
+) -> Result<usize, String> {
+    let scan_opts = build_scan_opts(deep, &opts);
+    let llm_cfg = load_llm_config(&state).await?;
+    let access_token = ensure_gmail_token(&state).await?;
+    let llm = LlmClient::from_config(llm_cfg);
+
+    state.scan_cancel.store(false, Ordering::Relaxed);
+
+    let signature = scan_signature(&range, &scan_opts);
+    let screen = match take_cached_screen(&state, &signature) {
+        Some(cached) => cached,
+        None => {
+            let months = to_months(range);
+            let query = parsers::gmail::build_query_for_range(
+                &months,
+                scan_opts.mode,
+                scan_opts.use_purchases,
+            );
+            parsers::scan::screen(
+                &state.pool,
+                &access_token,
+                &query,
+                &scan_opts,
+                &state.scan_cancel,
+                make_scan_emit(&app),
+            )
+            .await
+            .map_err(|e| e.to_string())?
+        }
+    };
+
+    let counts = parsers::scan::extract(
+        &state.pool,
+        &llm,
+        &screen,
+        scan_opts.concurrency,
+        &state.scan_cancel,
+        make_scan_emit(&app),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let summary = parsers::scan::ScanSummary {
+        ran_at: chrono::Utc::now(),
+        mode: if deep { "deep" } else { "fast" }.to_string(),
+        matched_estimate: screen.matched_estimate,
+        listed: screen.listed as u32,
+        llm_calls: screen.candidates.len() as u32,
+        created: counts.created as u32,
+        skipped_seen: screen.skipped_seen as u32,
+        skipped_blocked: screen.skipped_blocked as u32,
+        skipped_no_amount: screen.skipped_no_amount as u32,
+        skipped_classified: counts.skipped_classified as u32,
+        skipped_recurrence: screen.skipped_recurrence as u32,
+    };
+    db::settings::set(&state.pool, db::settings::keys::LAST_SCAN_SUMMARY, &summary)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    log::info!(
+        "gmail scan done ({}): matched~{} listed={} llm={} created={} classified={} no_amount={} seen={} blocked={} recurrence={}",
+        summary.mode,
+        summary.matched_estimate,
+        summary.listed,
+        summary.llm_calls,
+        summary.created,
+        summary.skipped_classified,
+        summary.skipped_no_amount,
+        summary.skipped_seen,
+        summary.skipped_blocked,
+        summary.skipped_recurrence,
+    );
+
+    Ok(counts.created)
+}
+
+/// Stage 1 — tight, precision-favored Gmail scan.
 #[tauri::command]
 #[specta::specta]
 async fn run_gmail_scan(
     app: AppHandle,
     state: State<'_, AppState>,
     range: Vec<YearMonthDto>,
+    opts: ScanOptsDto,
 ) -> Result<usize, String> {
-    let llm_cfg: LlmConfig = db::settings::get(&state.pool, db::settings::keys::LLM_CONFIG)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "no LLM provider configured".to_string())?;
-
-    let creds: OAuthCredentials =
-        db::settings::get(&state.pool, db::settings::keys::GMAIL_OAUTH_CREDS)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Gmail OAuth credentials not configured".to_string())?;
-
-    let mut tokens: Tokens = db::settings::get(&state.pool, db::settings::keys::GMAIL_TOKENS)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Gmail not connected — click Connect Gmail first".to_string())?;
-
-    let access_token = oauth::ensure_access_token(&creds, &mut tokens)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    db::settings::set(&state.pool, db::settings::keys::GMAIL_TOKENS, &tokens)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let llm = LlmClient::from_config(llm_cfg);
-
-    let months: Vec<parsers::gmail::YearMonth> = range
-        .into_iter()
-        .map(|d| parsers::gmail::YearMonth {
-            year: d.year,
-            month: d.month,
-        })
-        .collect();
-
-    // Stage 1: tight, precision-favored Gmail keywords.
-    let query = parsers::gmail::build_query_for_range(&months, parsers::gmail::ScanMode::Fast);
-    let msg_ids = parsers::gmail::list_message_ids(&access_token, &query)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // Reset cancel flag at the start of every scan.
-    state.scan_cancel.store(false, Ordering::Relaxed);
-
-    let total = msg_ids.len();
-    let mut created = 0usize;
-    let mut skipped_seen = 0usize;
-    let mut skipped_fetch = 0usize;
-    let mut skipped_body = 0usize;
-    let mut skipped_extract = 0usize;
-    let mut skipped_classified = 0usize;
-    let mut skipped_blocked = 0usize;
-
-    let emit_progress = |processed: usize,
-                         created: usize,
-                         skipped_classified: usize,
-                         skipped_seen: usize,
-                         skipped_blocked: usize| {
-        let _ = app.emit(
-            "scan-progress",
-            serde_json::json!({
-                "processed": processed,
-                "total": total,
-                "created": created,
-                "skippedClassified": skipped_classified,
-                "skippedSeen": skipped_seen,
-                "skippedBlocked": skipped_blocked,
-            }),
-        );
-    };
-
-    // Initial emit so the UI shows "0 / total" right away.
-    emit_progress(0, 0, 0, 0, 0);
-
-    for (idx, id) in msg_ids.iter().enumerate() {
-        if state.scan_cancel.load(Ordering::Relaxed) {
-            log::info!(
-                "gmail scan cancelled: created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract} skipped_classified={skipped_classified} skipped_blocked={skipped_blocked}"
-            );
-            return Err("scan cancelled".to_string());
-        }
-
-        if db::detection_events::find_by_source_ref(&state.pool, DetectionSource::Gmail, id)
-            .await
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
-            skipped_seen += 1;
-            emit_progress(
-                idx + 1,
-                created,
-                skipped_classified,
-                skipped_seen,
-                skipped_blocked,
-            );
-            continue;
-        }
-
-        let msg = match parsers::gmail::fetch_message(&access_token, id).await {
-            Ok(m) => m,
-            Err(e) => {
-                log::warn!("gmail scan: fetch_message({id}) failed: {e}");
-                skipped_fetch += 1;
-                emit_progress(
-                    idx + 1,
-                    created,
-                    skipped_classified,
-                    skipped_seen,
-                    skipped_blocked,
-                );
-                continue;
-            }
-        };
-
-        // Normalize sender from the From header before paying for the LLM.
-        // If the sender is on the user-built blocklist, skip immediately.
-        let msg_ref = parsers::gmail::message_ref_from(&msg, id);
-        let sender = msg_ref.from.as_deref().map(normalize_sender);
-        if let Some(ref s) = sender
-            && let Ok(Some(learned)) = db::learned_senders::find(&state.pool, s).await
-            && learned.decision == LearnedDecision::Block
-        {
-            log::info!("gmail scan: sender {s} on blocklist, skipping {id}");
-            skipped_blocked += 1;
-            emit_progress(
-                idx + 1,
-                created,
-                skipped_classified,
-                skipped_seen,
-                skipped_blocked,
-            );
-            continue;
-        }
-
-        let body = match parsers::gmail::extract_text_body(&msg) {
-            Some(b) => b,
-            None => {
-                log::warn!("gmail scan: no text body in message {id}");
-                skipped_body += 1;
-                emit_progress(
-                    idx + 1,
-                    created,
-                    skipped_classified,
-                    skipped_seen,
-                    skipped_blocked,
-                );
-                continue;
-            }
-        };
-
-        let hint_opt = match extract_from_text(&llm, body).await {
-            Ok(h) => h,
-            Err(e) => {
-                log::warn!("gmail scan: LLM extract for {id} failed: {e}");
-                skipped_extract += 1;
-                emit_progress(
-                    idx + 1,
-                    created,
-                    skipped_classified,
-                    skipped_seen,
-                    skipped_blocked,
-                );
-                continue;
-            }
-        };
-
-        // LLM gate: None means "this isn't a recurring subscription".
-        let Some(hint) = hint_opt else {
-            skipped_classified += 1;
-            emit_progress(
-                idx + 1,
-                created,
-                skipped_classified,
-                skipped_seen,
-                skipped_blocked,
-            );
-            continue;
-        };
-
-        let summary = msg_ref
-            .subject
-            .clone()
-            .unwrap_or_else(|| "(no subject)".to_string());
-        let payload = serde_json::to_value(&hint).map_err(|e| e.to_string())?;
-
-        let ev = DetectionEvent {
-            id: Uuid::now_v7(),
-            source: DetectionSource::Gmail,
-            source_ref: Some(id.clone()),
-            raw_summary: Some(summary),
-            sender: sender.clone(),
-            parsed_payload: payload,
-            confidence: 0.0,
-            status: DetectionStatus::Pending,
-            matched_subscription_id: None,
-            reviewed_at: None,
-            created_at: chrono::Utc::now(),
-        };
-
-        db::detection_events::insert(&state.pool, &ev)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        created += 1;
-        emit_progress(
-            idx + 1,
-            created,
-            skipped_classified,
-            skipped_seen,
-            skipped_blocked,
-        );
-    }
-
-    log::info!(
-        "gmail scan done: matched={total} created={created} skipped_seen={skipped_seen} skipped_fetch={skipped_fetch} skipped_body={skipped_body} skipped_extract={skipped_extract} skipped_classified={skipped_classified} skipped_blocked={skipped_blocked}"
-    );
-    Ok(created)
+    do_scan(app, state, range, false, opts).await
 }
 
 /// Stage 2 — broader Gmail keywords plus a multi-month recurrence filter.
-/// Only senders that appear in the selected range across 2+ distinct months
-/// proceed to the LLM. Use after Stage 1 if you suspect it missed real
-/// subscriptions hiding under non-tight keywords (Adobe Receipt, JR定期 etc.).
+/// Only senders appearing in 2+ distinct months proceed to the LLM, so it
+/// rewards selecting several months.
 #[tauri::command]
 #[specta::specta]
 async fn run_gmail_deep_scan(
     app: AppHandle,
     state: State<'_, AppState>,
     range: Vec<YearMonthDto>,
+    opts: ScanOptsDto,
 ) -> Result<usize, String> {
-    let llm_cfg: LlmConfig = db::settings::get(&state.pool, db::settings::keys::LLM_CONFIG)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "no LLM provider configured".to_string())?;
+    do_scan(app, state, range, true, opts).await
+}
 
-    let creds: OAuthCredentials =
-        db::settings::get(&state.pool, db::settings::keys::GMAIL_OAUTH_CREDS)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Gmail OAuth credentials not configured".to_string())?;
-
-    let mut tokens: Tokens = db::settings::get(&state.pool, db::settings::keys::GMAIL_TOKENS)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Gmail not connected — click Connect Gmail first".to_string())?;
-
-    let access_token = oauth::ensure_access_token(&creds, &mut tokens)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    db::settings::set(&state.pool, db::settings::keys::GMAIL_TOKENS, &tokens)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let llm = LlmClient::from_config(llm_cfg);
-
-    let months: Vec<parsers::gmail::YearMonth> = range
-        .into_iter()
-        .map(|d| parsers::gmail::YearMonth {
-            year: d.year,
-            month: d.month,
-        })
-        .collect();
-
-    let query = parsers::gmail::build_query_for_range(&months, parsers::gmail::ScanMode::Deep);
-    let msg_ids = parsers::gmail::list_message_ids(&access_token, &query)
-        .await
-        .map_err(|e| e.to_string())?;
+/// Dry run: list + screen only (no LLM), returning how many emails matched,
+/// how many would reach the LLM, and an estimated token/cost figure. Caches
+/// the screened survivors so a follow-up scan with the same parameters skips
+/// re-fetching.
+#[tauri::command]
+#[specta::specta]
+async fn preview_gmail_scan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    range: Vec<YearMonthDto>,
+    deep: bool,
+    opts: ScanOptsDto,
+) -> Result<parsers::scan::ScanEstimate, String> {
+    let scan_opts = build_scan_opts(deep, &opts);
+    let llm_cfg = load_llm_config(&state).await?;
+    let (provider, model) = llm_provider_model(&llm_cfg);
+    let access_token = ensure_gmail_token(&state).await?;
 
     state.scan_cancel.store(false, Ordering::Relaxed);
-    let total = msg_ids.len();
 
-    // Phase 1 — header pass. Fetch each message and record (id, sender,
-    // year-month). Headers are cheap enough to fetch in series; no LLM cost.
-    type Header = (String, Option<String>, Option<(i32, u32)>);
-    let mut headers: Vec<Header> = Vec::with_capacity(total);
-    let mut by_sender: HashMap<String, HashSet<(i32, u32)>> = HashMap::new();
+    let signature = scan_signature(&range, &scan_opts);
+    let months = to_months(range);
+    let query =
+        parsers::gmail::build_query_for_range(&months, scan_opts.mode, scan_opts.use_purchases);
+    let screen = parsers::scan::screen(
+        &state.pool,
+        &access_token,
+        &query,
+        &scan_opts,
+        &state.scan_cancel,
+        make_scan_emit(&app),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
-    for (idx, id) in msg_ids.iter().enumerate() {
-        if state.scan_cancel.load(Ordering::Relaxed) {
-            return Err("scan cancelled".to_string());
-        }
-        let _ = app.emit(
-            "scan-progress",
-            serde_json::json!({
-                "processed": idx,
-                "total": total,
-                "created": 0,
-                "skippedClassified": 0,
-                "skippedSeen": 0,
-                "skippedBlocked": 0,
-                "phase": "indexing",
-            }),
-        );
+    let estimate = parsers::scan::estimate(&screen, &provider, &model);
 
-        match parsers::gmail::fetch_message(&access_token, id).await {
-            Ok(msg) => {
-                let r = parsers::gmail::message_ref_from(&msg, id);
-                let sender = r.from.as_deref().map(normalize_sender);
-                let ym = r.received_at.map(|d| (d.year(), d.month()));
-                if let (Some(ref s), Some(ym)) = (sender.as_ref(), ym) {
-                    by_sender.entry((*s).clone()).or_default().insert(ym);
-                }
-                headers.push((id.clone(), sender, ym));
-            }
-            Err(e) => {
-                log::warn!("deep scan: fetch_message({id}) failed in index pass: {e}");
-                headers.push((id.clone(), None, None));
-            }
-        }
+    if let Ok(mut guard) = state.last_preview.lock() {
+        *guard = Some(PreviewCache { signature, screen });
     }
 
-    let recurring: HashSet<String> = by_sender
-        .iter()
-        .filter(|(_, months)| months.len() >= 2)
-        .map(|(s, _)| s.clone())
-        .collect();
-    log::info!(
-        "deep scan index: senders={} recurring={}",
-        by_sender.len(),
-        recurring.len()
-    );
+    Ok(estimate)
+}
 
-    // Phase 2 — LLM extract only messages from senders with ≥2 months hits.
-    let candidates: Vec<&Header> = headers
-        .iter()
-        .filter(|(_, sender, _)| sender.as_ref().is_some_and(|s| recurring.contains(s)))
-        .collect();
-    let cand_total = candidates.len();
-
-    let mut created = 0usize;
-    let mut skipped_seen = 0usize;
-    let mut skipped_blocked = 0usize;
-    let mut skipped_classified = 0usize;
-    let mut skipped_extract = 0usize;
-
-    for (idx, (id, sender, _)) in candidates.iter().enumerate() {
-        if state.scan_cancel.load(Ordering::Relaxed) {
-            return Err("scan cancelled".to_string());
-        }
-        let _ = app.emit(
-            "scan-progress",
-            serde_json::json!({
-                "processed": idx,
-                "total": cand_total,
-                "created": created,
-                "skippedClassified": skipped_classified,
-                "skippedSeen": skipped_seen,
-                "skippedBlocked": skipped_blocked,
-                "phase": "extracting",
-            }),
-        );
-
-        if db::detection_events::find_by_source_ref(&state.pool, DetectionSource::Gmail, id)
-            .await
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
-            skipped_seen += 1;
-            continue;
-        }
-
-        if let Some(s) = sender
-            && let Ok(Some(learned)) = db::learned_senders::find(&state.pool, s).await
-            && learned.decision == LearnedDecision::Block
-        {
-            skipped_blocked += 1;
-            continue;
-        }
-
-        let msg = match parsers::gmail::fetch_message(&access_token, id).await {
-            Ok(m) => m,
-            Err(e) => {
-                log::warn!("deep scan: fetch_message({id}) failed: {e}");
-                skipped_extract += 1;
-                continue;
-            }
-        };
-        let body = match parsers::gmail::extract_text_body(&msg) {
-            Some(b) => b,
-            None => {
-                skipped_extract += 1;
-                continue;
-            }
-        };
-        let hint_opt = match extract_from_text(&llm, body).await {
-            Ok(h) => h,
-            Err(e) => {
-                log::warn!("deep scan: LLM extract for {id} failed: {e}");
-                skipped_extract += 1;
-                continue;
-            }
-        };
-        let Some(hint) = hint_opt else {
-            skipped_classified += 1;
-            continue;
-        };
-
-        let msg_ref = parsers::gmail::message_ref_from(&msg, id);
-        let summary = msg_ref
-            .subject
-            .clone()
-            .unwrap_or_else(|| "(no subject)".to_string());
-        let payload = serde_json::to_value(&hint).map_err(|e| e.to_string())?;
-
-        let ev = DetectionEvent {
-            id: Uuid::now_v7(),
-            source: DetectionSource::Gmail,
-            source_ref: Some((*id).clone()),
-            raw_summary: Some(summary),
-            sender: sender.clone(),
-            parsed_payload: payload,
-            confidence: 0.0,
-            status: DetectionStatus::Pending,
-            matched_subscription_id: None,
-            reviewed_at: None,
-            created_at: chrono::Utc::now(),
-        };
-        db::detection_events::insert(&state.pool, &ev)
-            .await
-            .map_err(|e| e.to_string())?;
-        created += 1;
-    }
-
-    log::info!(
-        "deep scan done: matched={total} recurring={} extracted_candidates={cand_total} created={created} skipped_seen={skipped_seen} skipped_blocked={skipped_blocked} skipped_classified={skipped_classified} skipped_extract={skipped_extract}",
-        recurring.len()
-    );
-    Ok(created)
+/// Most recent scan summary for the dashboard card.
+#[tauri::command]
+#[specta::specta]
+async fn get_last_scan_summary(
+    state: State<'_, AppState>,
+) -> Result<Option<parsers::scan::ScanSummary>, String> {
+    db::settings::get(&state.pool, db::settings::keys::LAST_SCAN_SUMMARY)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Cooperatively cancel an in-flight `run_gmail_scan` loop. The loop checks
@@ -1373,6 +1214,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         start_gmail_oauth,
         run_gmail_scan,
         run_gmail_deep_scan,
+        preview_gmail_scan,
+        get_last_scan_summary,
         save_paypal_oauth_credentials,
         get_paypal_oauth_credentials,
         has_paypal_tokens,
@@ -1388,7 +1231,12 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
 /// override, so the generated file is fully typed — no `@ts-nocheck` escape
 /// hatch and no synthesized `Value` alias required. The frontend imports these
 /// types and command wrappers directly.
-#[cfg(debug_assertions)]
+///
+/// Desktop-only: the output path is relative to the dev machine's working
+/// directory and only exists during `tauri dev` on a host. On Android/iOS the
+/// app filesystem is read-only, so attempting the write there aborts the
+/// process at startup — hence the `desktop` cfg gate.
+#[cfg(all(debug_assertions, desktop))]
 fn export_bindings(builder: &tauri_specta::Builder<tauri::Wry>) {
     builder
         .export(
@@ -1402,7 +1250,7 @@ fn export_bindings(builder: &tauri_specta::Builder<tauri::Wry>) {
 pub fn run() {
     let specta_builder = specta_builder();
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, desktop))]
     export_bindings(&specta_builder);
 
     tauri::Builder::default()
@@ -1445,6 +1293,7 @@ pub fn run() {
                 pool,
                 oauth_cancel: StdMutex::new(None),
                 scan_cancel: Arc::new(AtomicBool::new(false)),
+                last_preview: StdMutex::new(None),
             });
             Ok(())
         })

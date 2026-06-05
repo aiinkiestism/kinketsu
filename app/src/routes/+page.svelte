@@ -5,6 +5,8 @@
 	import { paymentMethods } from '$lib/stores/payment_methods.svelte';
 	import { categories } from '$lib/stores/categories.svelte';
 	import { exchangeRates } from '$lib/stores/exchange_rates.svelte';
+	import { detectionEvents } from '$lib/stores/detection_events.svelte';
+	import { gmail } from '$lib/stores/gmail.svelte';
 	import { i18n, t, tn } from '$lib/i18n.svelte';
 	import { CURRENCIES, PAYMENT_METHOD_KINDS, SUBSCRIPTION_STATUSES } from '$lib/constants';
 	import type {
@@ -295,10 +297,38 @@
 		}
 	}
 
+	let pendingReview = $derived(detectionEvents.items.filter((e) => e.status === 'pending'));
+
+	function detMoney(amount_minor: number | null, currency: string | null): string {
+		if (amount_minor === null || !currency) return '—';
+		try {
+			return new Intl.NumberFormat(i18n.bcp47, {
+				style: 'currency',
+				currency,
+				maximumFractionDigits: currency === 'JPY' ? 0 : 2
+			}).format(fromMinor(amount_minor, currency));
+		} catch {
+			return `${amount_minor} ${currency}`;
+		}
+	}
+
+	function formatTimestamp(iso: string): string {
+		try {
+			return new Intl.DateTimeFormat(i18n.bcp47, {
+				dateStyle: 'medium',
+				timeStyle: 'short'
+			}).format(new Date(iso));
+		} catch {
+			return iso;
+		}
+	}
+
 	onMount(() => {
 		subscriptions.load();
 		paymentMethods.load();
 		categories.load();
+		detectionEvents.load();
+		gmail.loadSummary();
 		exchangeRates.init(i18n.locale).then(() => {
 			if (!editingSub) {
 				formCurrency = exchangeRates.base;
@@ -323,10 +353,61 @@
 			{/if}
 		</article>
 		<article class="glass card">
-			<h2>{t('dashboard.upcoming')}</h2>
-			<p class="muted">{t('dashboard.upcoming_empty')}</p>
+			<h2>{t('dashboard.last_scan_heading')}</h2>
+			{#if gmail.summary}
+				<p class="big">{gmail.summary.created}</p>
+				<p class="muted">
+					{t('dashboard.last_scan_summary', {
+						matched: gmail.summary.matched_estimate,
+						llm: gmail.summary.llm_calls,
+						created: gmail.summary.created
+					})}
+				</p>
+				<p class="muted small">
+					{gmail.summary.mode === 'deep'
+						? t('dashboard.last_scan_mode_deep')
+						: t('dashboard.last_scan_mode_fast')} · {formatTimestamp(gmail.summary.ran_at)}
+				</p>
+			{:else}
+				<p class="muted">{t('dashboard.last_scan_never')}</p>
+			{/if}
 		</article>
 	</section>
+
+	{#if pendingReview.length > 0}
+		<section class="review-section">
+			<div class="list-header">
+				<h2>
+					{t('dashboard.review_heading')}
+					<span class="review-badge">{pendingReview.length}</span>
+				</h2>
+				<a class="glass-subtle pill-btn" href="/inbox">{t('dashboard.review_view_all')}</a>
+			</div>
+			<ul class="review-list">
+				{#each pendingReview.slice(0, 5) as ev (ev.id)}
+					<li class="glass review-row">
+						<div class="review-main">
+							<span class="review-name">{ev.parsed_payload.service_name ?? '—'}</span>
+							<span class="review-amt">
+								{detMoney(ev.parsed_payload.amount_minor, ev.parsed_payload.currency)}
+								{#if ev.parsed_payload.billing_cycle}
+									<span class="sep">·</span>{t(`cycle.${ev.parsed_payload.billing_cycle}`)}
+								{/if}
+							</span>
+						</div>
+						<div class="review-actions">
+							<button class="confirm" onclick={() => detectionEvents.confirm(ev.id)}>
+								{t('inbox.confirm')}
+							</button>
+							<button class="reject" onclick={() => detectionEvents.reject(ev.id)}>
+								{t('inbox.reject')}
+							</button>
+						</div>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
 
 	<section class="list-section">
 		<div class="list-header">
@@ -769,6 +850,83 @@
 	.warn {
 		color: var(--color-accent-yuzu);
 	}
+
+	/* Needs-review section */
+	.review-section {
+		margin-bottom: 2.5rem;
+	}
+	.review-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 1.4rem;
+		height: 1.4rem;
+		padding: 0 0.4rem;
+		margin-left: 0.4rem;
+		border-radius: 999px;
+		background: var(--color-accent-sora);
+		color: oklch(0.15 0.05 245);
+		font-size: 0.8rem;
+		font-weight: 700;
+		vertical-align: middle;
+	}
+	.review-list {
+		list-style: none;
+		padding: 0;
+		margin: 1rem 0 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.review-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.85rem 1.25rem;
+		border-radius: var(--kk-radius-sm);
+	}
+	.review-main {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		min-width: 0;
+	}
+	.review-name {
+		font-weight: 600;
+	}
+	.review-amt {
+		font-size: 0.85rem;
+		color: var(--kk-text-muted);
+		font-variant-numeric: tabular-nums;
+	}
+	.review-amt .sep {
+		opacity: 0.5;
+		margin: 0 0.35rem;
+	}
+	.review-actions {
+		display: flex;
+		gap: 0.4rem;
+		flex-shrink: 0;
+	}
+	.review-actions button {
+		padding: 0.5rem 0.85rem;
+		border-radius: var(--kk-radius-sm);
+		border: 1px solid var(--kk-stroke);
+		cursor: pointer;
+		font-family: inherit;
+		font-size: 0.85rem;
+		font-weight: 600;
+	}
+	.review-actions .confirm {
+		background: var(--color-accent-matcha);
+		color: oklch(0.15 0.05 155);
+	}
+	.review-actions .reject {
+		background: transparent;
+		color: var(--kk-text-muted);
+	}
+
 	.form-heading {
 		grid-column: span 2;
 		margin: 0;

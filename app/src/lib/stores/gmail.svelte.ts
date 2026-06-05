@@ -1,6 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { OAuthCredentials, YearMonthDto } from '$lib/bindings';
+import type {
+	OAuthCredentials,
+	ScanEstimate,
+	ScanOptsDto,
+	ScanSummary,
+	YearMonthDto
+} from '$lib/bindings';
 
 export type ScanPhase = 'extracting' | 'indexing';
 
@@ -24,6 +30,9 @@ class GmailStore {
 	error = $state<string | null>(null);
 	lastScanResult = $state<number | null>(null);
 	progress = $state<ScanProgress | null>(null);
+	previewing = $state(false);
+	estimate = $state<ScanEstimate | null>(null);
+	summary = $state<ScanSummary | null>(null);
 
 	async load() {
 		this.loading = true;
@@ -96,15 +105,51 @@ class GmailStore {
 		}
 	}
 
-	async runScan(range: YearMonthDto[]): Promise<number> {
-		return this.runScanInner('run_gmail_scan', range);
+	async loadSummary() {
+		try {
+			this.summary = await invoke<ScanSummary | null>('get_last_scan_summary');
+		} catch (e) {
+			this.error = String(e);
+		}
 	}
 
-	async runDeepScan(range: YearMonthDto[]): Promise<number> {
-		return this.runScanInner('run_gmail_deep_scan', range);
+	/** Dry run: estimate counts + cost without spending any LLM calls. */
+	async preview(range: YearMonthDto[], deep: boolean, opts: ScanOptsDto): Promise<ScanEstimate> {
+		this.previewing = true;
+		this.error = null;
+		this.progress = null;
+
+		let unlisten: UnlistenFn | null = null;
+		try {
+			unlisten = await listen<ScanProgress>('scan-progress', (event) => {
+				this.progress = event.payload;
+			});
+			const est = await invoke<ScanEstimate>('preview_gmail_scan', { range, deep, opts });
+			this.estimate = est;
+			return est;
+		} catch (e) {
+			this.error = String(e);
+			throw e;
+		} finally {
+			if (unlisten) unlisten();
+			this.previewing = false;
+			this.progress = null;
+		}
 	}
 
-	private async runScanInner(command: string, range: YearMonthDto[]): Promise<number> {
+	async runScan(range: YearMonthDto[], opts: ScanOptsDto): Promise<number> {
+		return this.runScanInner('run_gmail_scan', range, opts);
+	}
+
+	async runDeepScan(range: YearMonthDto[], opts: ScanOptsDto): Promise<number> {
+		return this.runScanInner('run_gmail_deep_scan', range, opts);
+	}
+
+	private async runScanInner(
+		command: string,
+		range: YearMonthDto[],
+		opts: ScanOptsDto
+	): Promise<number> {
 		this.scanning = true;
 		this.error = null;
 		this.lastScanResult = null;
@@ -115,8 +160,10 @@ class GmailStore {
 			unlisten = await listen<ScanProgress>('scan-progress', (event) => {
 				this.progress = event.payload;
 			});
-			const created = await invoke<number>(command, { range });
+			const created = await invoke<number>(command, { range, opts });
 			this.lastScanResult = created;
+			// Refresh the dashboard summary the backend just persisted.
+			await this.loadSummary();
 			return created;
 		} catch (e) {
 			this.error = String(e);

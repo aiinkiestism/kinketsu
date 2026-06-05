@@ -13,6 +13,7 @@ pub mod gemini;
 pub mod lmstudio;
 pub mod ollama;
 pub mod openai;
+pub mod pricing;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(tag = "provider", rename_all = "snake_case")]

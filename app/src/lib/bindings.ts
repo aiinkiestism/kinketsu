@@ -70,14 +70,35 @@ export const commands = {
 	 */
 	openUrl: (url: string) => typedError<null, string>(__TAURI_INVOKE("open_url", { url })),
 	startGmailOauth: () => typedError<null, string>(__TAURI_INVOKE("start_gmail_oauth")),
-	runGmailScan: (range: YearMonthDto[]) => typedError<number, string>(__TAURI_INVOKE("run_gmail_scan", { range })),
+	// Stage 1 — tight, precision-favored Gmail scan.
+	runGmailScan: (range: YearMonthDto[], opts: ScanOptsDto) => typedError<number, string>(__TAURI_INVOKE("run_gmail_scan", { range, opts })),
 	/**
 	 *  Stage 2 — broader Gmail keywords plus a multi-month recurrence filter.
-	 *  Only senders that appear in the selected range across 2+ distinct months
-	 *  proceed to the LLM. Use after Stage 1 if you suspect it missed real
-	 *  subscriptions hiding under non-tight keywords (Adobe Receipt, JR定期 etc.).
+	 *  Only senders appearing in 2+ distinct months proceed to the LLM, so it
+	 *  rewards selecting several months.
 	 */
-	runGmailDeepScan: (range: YearMonthDto[]) => typedError<number, string>(__TAURI_INVOKE("run_gmail_deep_scan", { range })),
+	runGmailDeepScan: (range: YearMonthDto[], opts: ScanOptsDto) => typedError<number, string>(__TAURI_INVOKE("run_gmail_deep_scan", { range, opts })),
+	/**
+	 *  Dry run: list + screen only (no LLM), returning how many emails matched,
+	 *  how many would reach the LLM, and an estimated token/cost figure. Caches
+	 *  the screened survivors so a follow-up scan with the same parameters skips
+	 *  re-fetching.
+	 */
+	previewGmailScan: (range: YearMonthDto[], deep: boolean, opts: ScanOptsDto) => typedError<ScanEstimate, string>(__TAURI_INVOKE("preview_gmail_scan", { range, deep, opts })),
+	// Most recent scan summary for the dashboard card.
+	getLastScanSummary: () => typedError<{
+	ran_at: string,
+	mode: string,
+	matched_estimate: number,
+	listed: number,
+	llm_calls: number,
+	created: number,
+	skipped_seen: number,
+	skipped_blocked: number,
+	skipped_no_amount: number,
+	skipped_classified: number,
+	skipped_recurrence: number,
+} | null, string>(__TAURI_INVOKE("get_last_scan_summary")),
 	savePaypalOauthCredentials: (creds: OAuthCredentials) => typedError<null, string>(__TAURI_INVOKE("save_paypal_oauth_credentials", { creds })),
 	getPaypalOauthCredentials: () => typedError<{
 	client_id: string,
@@ -221,6 +242,63 @@ export type PaymentMethodKind = "credit_card" | "debit_card" | "bank_account" | 
 "carrier" | 
 // QR / mobile wallets (e.g. PayPay, Rakuten Pay, LINE Pay).
 "wallet" | "app_store" | "play_store" | "crypto" | "other";
+
+// Cost + counts preview returned to the UI before a scan commits to LLM spend.
+export type ScanEstimate = {
+	// Gmail's rough total for the query (can exceed `listed` when capped).
+	matched_estimate: number,
+	// Messages actually fetched + screened (≤ `max_fetch`).
+	listed: number,
+	skipped_seen: number,
+	skipped_blocked: number,
+	skipped_no_body: number,
+	skipped_no_amount: number,
+	skipped_recurrence: number,
+	// Survivors that will each cost one LLM call.
+	llm_targets: number,
+	truncated_by_max_llm: boolean,
+	input_tokens: number,
+	output_tokens_est: number,
+	cost_low_usd: number,
+	cost_high_usd: number,
+	provider: string,
+	model: string,
+	// True for Ollama / LM Studio — cost is zero.
+	is_local: boolean,
+	/**
+	 *  How the figures were derived. Always `"approximate"` for now (heuristic
+	 *  token count + list prices); surfaced so the UI can say so.
+	 */
+	exactness: string,
+};
+
+/**
+ *  Per-scan tuning the UI sends alongside the month range. `None` caps fall
+ *  back to the pipeline defaults.
+ */
+export type ScanOptsDto = {
+	// Max messages to fetch + screen (replaces the old hard 500 cap).
+	max_fetch: number | null,
+	// Max survivors sent to the LLM — the cost-bearing knob.
+	max_llm: number | null,
+	// Restrict the Gmail query to `category:purchases`.
+	use_purchases: boolean,
+};
+
+// Persisted record of the most recent scan, surfaced on the dashboard.
+export type ScanSummary = {
+	ran_at: string,
+	mode: string,
+	matched_estimate: number,
+	listed: number,
+	llm_calls: number,
+	created: number,
+	skipped_seen: number,
+	skipped_blocked: number,
+	skipped_no_amount: number,
+	skipped_classified: number,
+	skipped_recurrence: number,
+};
 
 export type Subscription = {
 	id: string,

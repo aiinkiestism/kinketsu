@@ -278,6 +278,13 @@ const EN: Record<string, string> = {
 	'inbox.preview_cost_note': 'Estimate: input tokens approximated, output capped. Prices are list rates.',
 	'inbox.preview_truncated':
 		'Capped at your “Max LLM calls” limit — raise it to cover everything.',
+	'inbox.preview_free_notifications':
+		'{count} card/bank/PayPal notifications parsed for free (no LLM).',
+	'inbox.recurring_pill_one': '🔁 1 mo',
+	'inbox.recurring_pill_other': '🔁 {count} mo',
+	'source_kind.merchant_receipt': 'receipt',
+	'source_kind.processor_notification': 'PayPal/processor',
+	'source_kind.card_notification': 'card/bank',
 
 	'dashboard.last_scan_heading': 'Last scan',
 	'dashboard.last_scan_never': 'No scan yet — run one from the Inbox.',

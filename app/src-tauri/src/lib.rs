@@ -485,7 +485,7 @@ async fn do_scan(
         mode: if deep { "deep" } else { "fast" }.to_string(),
         matched_estimate: screen.matched_estimate,
         listed: screen.listed as u32,
-        llm_calls: screen.candidates.len() as u32,
+        llm_calls: screen.llm_targets() as u32,
         created: counts.created as u32,
         skipped_seen: screen.skipped_seen as u32,
         skipped_blocked: screen.skipped_blocked as u32,

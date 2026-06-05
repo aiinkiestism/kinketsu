@@ -1,27 +1,24 @@
 //! Phased Gmail scan pipeline shared by the preview and the real scan.
 //!
-//! The scan is split so that the expensive LLM step is the *last* thing that
-//! runs, and so a cost preview can execute everything up to (but not
-//! including) it:
+//! Redesigned around **merchant-keyed recurrence** after studying a real inbox:
 //!
-//! 1. **list**   — [`gmail::list_message_ids`]: cheap, a few API calls; also
-//!    yields Gmail's overall result-size estimate.
-//! 2. **screen** — [`screen`]: fetch each listed message concurrently, drop
-//!    the ones already seen, on the sender blocklist, body-less, or with no
-//!    currency amount (the [`money_gate`]). Deep mode additionally keeps only
-//!    senders recurring across ≥2 months. The survivors carry their trimmed
-//!    body, so they can be tokenized for an exact-ish cost figure and reused
-//!    by the extraction pass without re-fetching.
-//! 3. **estimate** — [`estimate`]: tokenize survivor bodies + price them.
-//!    Preview = list + screen + estimate.
-//! 4. **extract** — [`extract`]: one LLM call per survivor (concurrent),
-//!    inserting a `DetectionEvent` for each real subscription. Scan = list +
-//!    screen + extract.
+//! - The most complete ledger of recurring charges is the pile of bank / card /
+//!   wallet *usage notifications* (one per charge). These follow fixed
+//!   templates, so [`notifications`] parses (merchant, amount) out of them with
+//!   regex — no LLM call. That's both the main cost lever and the recall win.
+//! - Aggregators (Google Play, PayPal, a bank) bundle many subscriptions under
+//!   one sender, and the same subscription shows up across several sources
+//!   (merchant email + PayPal + bank card). So recurrence and de-duplication
+//!   key on the **merchant** ([`merchant`] clusters the messy strings), not the
+//!   sender, and one subscription collapses to a single detection.
+//! - Only freeform merchant receipts (which vary too much for templates) reach
+//!   the LLM, gated by [`money_gate`].
 //!
-//! Caps: `max_fetch` bounds step 1 (replacing the old hard-coded 500), and
-//! `max_llm` bounds how many survivors reach step 4 — the cost-bearing knob.
+//! Phases: list → screen (fetch + deterministic-parse + money gate) →
+//! estimate (price the freeform LLM targets) → extract (LLM the freeform, then
+//! aggregate everything by merchant and insert one detection per merchant).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Datelike, Utc};
@@ -29,21 +26,23 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use super::{gmail, money_gate};
+use super::{gmail, merchant, money_gate, notifications};
 use crate::db;
 use crate::llm::{LlmClient, pricing};
-use crate::models::{DetectionEvent, DetectionSource, DetectionStatus, LearnedDecision};
+use crate::models::{
+    BillingCycle, DetectionEvent, DetectionSource, DetectionStatus, LearnedDecision,
+};
+use crate::parsers::ParsedSubscriptionHint;
 use crate::parsers::gmail::ScanMode;
+use crate::parsers::notifications::{NotificationHint, SourceKind};
 use crate::{Error, Result};
 
-/// Sentinel returned by [`extract`] when the cooperative cancel flag is set
-/// mid-pass. The frontend matches on this substring.
+/// Sentinel returned when the cooperative cancel flag is set mid-pass.
 pub const CANCELLED: &str = "scan cancelled";
 
-pub const DEFAULT_MAX_FETCH: usize = 500;
-pub const DEFAULT_MAX_LLM: usize = 100;
-/// In-flight Gmail/LLM requests per pass. I/O-bound, so a handful keeps the
-/// pipeline busy without tripping provider rate limits.
+pub const DEFAULT_MAX_FETCH: usize = 800;
+pub const DEFAULT_MAX_LLM: usize = 120;
+/// In-flight Gmail/LLM requests per pass.
 pub const DEFAULT_CONCURRENCY: usize = 6;
 
 /// Knobs for one scan/preview run.
@@ -69,8 +68,9 @@ impl ScanOptions {
     }
 }
 
-/// A message that survived screening and will be sent to the LLM. Carries its
-/// trimmed body so it can be both priced and extracted without re-fetching.
+/// A screened message: either pre-parsed deterministically from a known
+/// notification template (`notif = Some`, no LLM needed) or a freeform receipt
+/// carrying its body for the LLM (`notif = None`).
 #[derive(Debug, Clone)]
 pub struct Candidate {
     pub id: String,
@@ -78,10 +78,16 @@ pub struct Candidate {
     pub sender: Option<String>,
     pub body: String,
     pub year_month: Option<(i32, u32)>,
+    pub notif: Option<NotificationHint>,
 }
 
-/// Outcome of the screening pass — the survivor set plus a tally of why the
-/// rest were dropped.
+impl Candidate {
+    fn is_freeform(&self) -> bool {
+        self.notif.is_none()
+    }
+}
+
+/// Outcome of the screening pass.
 #[derive(Debug, Clone)]
 pub struct ScreenResult {
     pub matched_estimate: u32,
@@ -96,7 +102,15 @@ pub struct ScreenResult {
     pub candidates: Vec<Candidate>,
 }
 
-/// Progress tick handed to the caller's callback during a pass.
+impl ScreenResult {
+    /// Candidates that will each cost one LLM call (freeform receipts).
+    #[must_use]
+    pub fn llm_targets(&self) -> usize {
+        self.candidates.iter().filter(|c| c.is_freeform()).count()
+    }
+}
+
+/// Progress tick handed to the caller's callback.
 #[derive(Debug, Clone, Copy)]
 pub struct Progress {
     pub phase: &'static str,
@@ -111,17 +125,18 @@ pub struct Progress {
 /// Cost + counts preview returned to the UI before a scan commits to LLM spend.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ScanEstimate {
-    /// Gmail's rough total for the query (can exceed `listed` when capped).
     pub matched_estimate: u32,
-    /// Messages actually fetched + screened (≤ `max_fetch`).
     pub listed: u32,
     pub skipped_seen: u32,
     pub skipped_blocked: u32,
     pub skipped_no_body: u32,
     pub skipped_no_amount: u32,
     pub skipped_recurrence: u32,
-    /// Survivors that will each cost one LLM call.
+    /// Freeform receipts that will each cost one LLM call. Bank/card/processor
+    /// notifications are parsed deterministically and cost nothing.
     pub llm_targets: u32,
+    /// Messages parsed from notification templates (free).
+    pub notification_hits: u32,
     pub truncated_by_max_llm: bool,
     pub input_tokens: u32,
     pub output_tokens_est: u32,
@@ -129,10 +144,7 @@ pub struct ScanEstimate {
     pub cost_high_usd: f64,
     pub provider: String,
     pub model: String,
-    /// True for Ollama / LM Studio — cost is zero.
     pub is_local: bool,
-    /// How the figures were derived. Always `"approximate"` for now (heuristic
-    /// token count + list prices); surfaced so the UI can say so.
     pub exactness: String,
 }
 
@@ -160,8 +172,169 @@ pub struct ExtractCounts {
     pub skipped_extract: usize,
 }
 
+// --- charge records & merchant aggregation ---
+
+/// One charge pulled from a single message (deterministically or via the LLM),
+/// before merchant-keyed aggregation.
+#[derive(Debug, Clone)]
+pub struct ChargeRecord {
+    pub message_id: String,
+    pub sender: Option<String>,
+    pub subject: Option<String>,
+    pub month: Option<(i32, u32)>,
+    pub merchant_raw: String,
+    /// A clean name if one source knew it (LLM receipt); else `None`.
+    pub display_name: Option<String>,
+    pub amount_minor: Option<i64>,
+    pub currency: Option<String>,
+    pub billing_cycle: Option<BillingCycle>,
+    pub kind: SourceKind,
+}
+
+/// One merchant after aggregating its charges across the scanned range.
+#[derive(Debug, Clone)]
+pub struct SubscriptionCandidate {
+    pub name: String,
+    pub brand_key: String,
+    pub amount_minor: Option<i64>,
+    pub currency: Option<String>,
+    pub billing_cycle: Option<BillingCycle>,
+    pub months: usize,
+    pub occurrences: usize,
+    pub recurring: bool,
+    pub amount_stable: bool,
+    pub kind: SourceKind,
+    pub sample_message_id: String,
+    pub sample_sender: Option<String>,
+    pub sample_subject: Option<String>,
+}
+
+fn source_rank(k: SourceKind) -> u8 {
+    match k {
+        SourceKind::MerchantReceipt => 2,
+        SourceKind::ProcessorNotification => 1,
+        SourceKind::CardNotification => 0,
+    }
+}
+
+/// Cluster charge records by merchant and summarize each into a subscription
+/// candidate. Cross-source duplicates of the same charge collapse here.
+#[must_use]
+pub fn aggregate(records: Vec<ChargeRecord>) -> Vec<SubscriptionCandidate> {
+    // Greedy clustering by brand similarity.
+    let mut clusters: Vec<Vec<ChargeRecord>> = Vec::new();
+    for r in records {
+        if let Some(cl) = clusters
+            .iter_mut()
+            .find(|cl| merchant::same_merchant(&cl[0].merchant_raw, &r.merchant_raw))
+        {
+            cl.push(r);
+        } else {
+            clusters.push(vec![r]);
+        }
+    }
+
+    let mut out = Vec::with_capacity(clusters.len());
+    for cl in clusters {
+        let months: std::collections::HashSet<(i32, u32)> =
+            cl.iter().filter_map(|r| r.month).collect();
+        // Modal amount + how many distinct months carry it.
+        let mut by_amount: HashMap<i64, std::collections::HashSet<(i32, u32)>> = HashMap::new();
+        for r in &cl {
+            if let (Some(a), Some(m)) = (r.amount_minor, r.month) {
+                by_amount.entry(a).or_default().insert(m);
+            }
+        }
+        let top = by_amount
+            .iter()
+            .max_by_key(|(_, ms)| ms.len())
+            .map(|(a, ms)| (*a, ms.len()));
+        let amount_stable = top.is_some_and(|(_, n)| n >= 2);
+
+        // Prefer the highest-ranked source for the canonical name/amount/cycle.
+        let best = cl
+            .iter()
+            .max_by_key(|r| source_rank(r.kind))
+            .expect("non-empty cluster");
+        let name = best
+            .display_name
+            .clone()
+            .unwrap_or_else(|| merchant::display_clean(&best.merchant_raw));
+        let currency = cl.iter().find_map(|r| r.currency.clone());
+        let amount_minor = top.map(|(a, _)| a).or(best.amount_minor);
+        let billing_cycle = cl.iter().find_map(|r| r.billing_cycle);
+        let kind = cl
+            .iter()
+            .map(|r| r.kind)
+            .max_by_key(|k| source_rank(*k))
+            .unwrap();
+
+        out.push(SubscriptionCandidate {
+            name,
+            brand_key: merchant::brand_key(&best.merchant_raw),
+            amount_minor,
+            currency,
+            billing_cycle,
+            months: months.len(),
+            occurrences: cl.len(),
+            recurring: months.len() >= 2,
+            amount_stable,
+            kind,
+            sample_message_id: best.message_id.clone(),
+            sample_sender: best.sender.clone(),
+            sample_subject: best.subject.clone(),
+        });
+    }
+    out
+}
+
+impl SubscriptionCandidate {
+    /// Whether this merchant looks like a real subscription worth surfacing.
+    ///
+    /// The discriminator is **monthly cadence**, not amount stability: a USD
+    /// subscription billed to a JP card shows a different ¥ amount every month
+    /// (FX drift), so requiring a repeated amount wrongly drops Splice, Cursor,
+    /// ChatGPT, Claude, Toggl, … Instead we ask "is this charged about once a
+    /// month?". That excludes variable shopping (Amazon, food delivery) and
+    /// high-frequency game IAP, which fire several times a month, while keeping
+    /// every real subscription regardless of currency. A merchant's own receipt
+    /// is trusted on its own; recall is favored (the user reviews and rejects).
+    #[must_use]
+    pub fn looks_like_subscription(&self) -> bool {
+        let per_month = self.occurrences as f64 / self.months.max(1) as f64;
+        let cadence_ok = per_month <= 3.0;
+        if !cadence_ok {
+            return false;
+        }
+        match self.kind {
+            SourceKind::MerchantReceipt => true,
+            _ => self.recurring,
+        }
+    }
+
+    fn to_hint(&self) -> ParsedSubscriptionHint {
+        ParsedSubscriptionHint {
+            service_name: Some(self.name.clone()),
+            amount_minor: self.amount_minor,
+            currency: self.currency.clone(),
+            billing_cycle: self.billing_cycle.or(if self.recurring {
+                Some(BillingCycle::Monthly)
+            } else {
+                None
+            }),
+            payment_method_hint: None,
+            charged_at: None,
+            months_seen: Some(u32::try_from(self.months).unwrap_or(u32::MAX)),
+            occurrences: Some(u32::try_from(self.occurrences).unwrap_or(u32::MAX)),
+            recurring: Some(self.recurring),
+            source_kind: Some(self.kind),
+        }
+    }
+}
+
+// --- pipeline ---
+
 enum Outcome {
-    Seen,
     Blocked,
     NoBody,
     NoAmount,
@@ -169,8 +342,9 @@ enum Outcome {
     Candidate(Box<Candidate>),
 }
 
-/// Steps 1–2: list + concurrently fetch & screen. Returns survivors plus the
-/// drop tally. `progress` is invoked once per message as it's screened.
+/// Phases 1–2: list + concurrently fetch & screen. Known notifications are
+/// parsed deterministically (and kept regardless of the money gate); freeform
+/// mail must show a currency amount to survive.
 pub async fn screen<P: FnMut(&Progress)>(
     pool: &SqlitePool,
     access_token: &str,
@@ -186,11 +360,6 @@ pub async fn screen<P: FnMut(&Progress)>(
     let futs = listing.ids.into_iter().map(|id| {
         let pool = pool.clone();
         async move {
-            if let Ok(Some(_)) =
-                db::detection_events::find_by_source_ref(&pool, DetectionSource::Gmail, &id).await
-            {
-                return Outcome::Seen;
-            }
             let msg = match gmail::fetch_message(access_token, &id).await {
                 Ok(m) => m,
                 Err(_) => return Outcome::FetchErr,
@@ -206,7 +375,12 @@ pub async fn screen<P: FnMut(&Progress)>(
             let Some(body) = gmail::extract_text_body(&msg) else {
                 return Outcome::NoBody;
             };
-            if !money_gate::has_amount(&body) {
+            let subj = r.subject.clone().unwrap_or_default();
+            let notif = sender
+                .as_deref()
+                .and_then(|s| notifications::parse_known(s, &subj, &body));
+            // Freeform mail with no amount is dropped; notifications are kept.
+            if notif.is_none() && !money_gate::has_amount(&body) {
                 return Outcome::NoAmount;
             }
             Outcome::Candidate(Box::new(Candidate {
@@ -215,6 +389,7 @@ pub async fn screen<P: FnMut(&Progress)>(
                 sender,
                 body: gmail::trim_body(body),
                 year_month: r.received_at.map(|d| (d.year(), d.month())),
+                notif,
             }))
         }
     });
@@ -222,7 +397,6 @@ pub async fn screen<P: FnMut(&Progress)>(
     let mut stream = futures::stream::iter(futs).buffer_unordered(opts.concurrency);
 
     let mut candidates: Vec<Candidate> = Vec::new();
-    let mut skipped_seen = 0;
     let mut skipped_blocked = 0;
     let mut skipped_no_body = 0;
     let mut skipped_no_amount = 0;
@@ -235,7 +409,6 @@ pub async fn screen<P: FnMut(&Progress)>(
         }
         processed += 1;
         match outcome {
-            Outcome::Seen => skipped_seen += 1,
             Outcome::Blocked => skipped_blocked += 1,
             Outcome::NoBody => skipped_no_body += 1,
             Outcome::NoAmount => skipped_no_amount += 1,
@@ -248,64 +421,52 @@ pub async fn screen<P: FnMut(&Progress)>(
             total,
             created: 0,
             skipped_classified: skipped_no_amount,
-            skipped_seen,
+            skipped_seen: 0,
             skipped_blocked,
         });
     }
 
-    // Deep mode: keep only senders that recur across ≥2 distinct months in the
-    // selected range. (Fast mode trusts its tight keywords and keeps all.)
-    let mut skipped_recurrence = 0;
-    if opts.mode == ScanMode::Deep {
-        let recurring: HashSet<String> = {
-            let mut by_sender: HashMap<String, HashSet<(i32, u32)>> = HashMap::new();
-            for c in &candidates {
-                if let (Some(s), Some(ym)) = (c.sender.clone(), c.year_month) {
-                    by_sender.entry(s).or_default().insert(ym);
-                }
-            }
-            by_sender
-                .into_iter()
-                .filter(|(_, months)| months.len() >= 2)
-                .map(|(s, _)| s)
-                .collect()
-        };
-        let before = candidates.len();
-        candidates.retain(|c| c.sender.as_deref().is_some_and(|s| recurring.contains(s)));
-        skipped_recurrence = before - candidates.len();
-    }
-
-    let truncated_by_max_llm = candidates.len() > opts.max_llm;
+    // Cap only the freeform (LLM-costed) candidates; keep all free notifications.
+    let (notifs, mut freeform): (Vec<Candidate>, Vec<Candidate>) =
+        candidates.into_iter().partition(|c| c.notif.is_some());
+    let truncated_by_max_llm = freeform.len() > opts.max_llm;
     if truncated_by_max_llm {
-        candidates.truncate(opts.max_llm);
+        freeform.truncate(opts.max_llm);
     }
+    let mut candidates = notifs;
+    candidates.extend(freeform);
 
     Ok(ScreenResult {
         matched_estimate,
         listed: total,
-        skipped_seen,
+        skipped_seen: 0,
         skipped_blocked,
         skipped_no_body,
         skipped_no_amount,
         skipped_fetch,
-        skipped_recurrence,
+        skipped_recurrence: 0,
         truncated_by_max_llm,
         candidates,
     })
 }
 
-/// Step 3: price the survivors for the given provider/model.
+/// Phase 3: price the freeform LLM targets for the given provider/model.
 #[must_use]
 pub fn estimate(screen: &ScreenResult, provider: &str, model: &str) -> ScanEstimate {
     let overhead = crate::parsers::extraction_prompt_token_overhead();
     let mut input_tokens = 0u32;
+    let mut llm_n = 0u32;
+    let mut notif_n = 0u32;
     for c in &screen.candidates {
-        input_tokens =
-            input_tokens.saturating_add(pricing::estimate_tokens(&c.body).saturating_add(overhead));
+        if c.is_freeform() {
+            llm_n += 1;
+            input_tokens = input_tokens
+                .saturating_add(pricing::estimate_tokens(&c.body).saturating_add(overhead));
+        } else {
+            notif_n += 1;
+        }
     }
-    let n = u32::try_from(screen.candidates.len()).unwrap_or(u32::MAX);
-    let output_tokens_est = n.saturating_mul(pricing::OUTPUT_TOKENS_PER_CALL);
-
+    let output_tokens_est = llm_n.saturating_mul(pricing::OUTPUT_TOKENS_PER_CALL);
     let price = pricing::price_for(provider, model);
     let is_local = price.is_none();
     let (cost_low_usd, cost_high_usd) = match price {
@@ -321,7 +482,8 @@ pub fn estimate(screen: &ScreenResult, provider: &str, model: &str) -> ScanEstim
         skipped_no_body: u32::try_from(screen.skipped_no_body).unwrap_or(u32::MAX),
         skipped_no_amount: u32::try_from(screen.skipped_no_amount).unwrap_or(u32::MAX),
         skipped_recurrence: u32::try_from(screen.skipped_recurrence).unwrap_or(u32::MAX),
-        llm_targets: n,
+        llm_targets: llm_n,
+        notification_hits: notif_n,
         truncated_by_max_llm: screen.truncated_by_max_llm,
         input_tokens,
         output_tokens_est,
@@ -334,9 +496,8 @@ pub fn estimate(screen: &ScreenResult, provider: &str, model: &str) -> ScanEstim
     }
 }
 
-/// Step 4: one LLM call per survivor (concurrent), inserting a `DetectionEvent`
-/// for each real subscription. DB inserts happen on the driving task as each
-/// extraction completes, so SQLite writes stay serialized. Honors `cancel`.
+/// Phase 4: LLM the freeform receipts, then aggregate every charge by merchant
+/// and insert one `DetectionEvent` per merchant that looks like a subscription.
 pub async fn extract<P: FnMut(&Progress)>(
     pool: &SqlitePool,
     llm: &LlmClient,
@@ -346,59 +507,92 @@ pub async fn extract<P: FnMut(&Progress)>(
     mut progress: P,
 ) -> Result<ExtractCounts> {
     let total = screen.candidates.len();
-    let mut created = 0;
+    let mut records: Vec<ChargeRecord> = Vec::new();
     let mut skipped_classified = 0;
     let mut skipped_extract = 0;
     let mut processed = 0;
 
-    // Each future takes an *owned* job tuple rather than `&Candidate`, so the
-    // future never borrows the candidate slice — `buffer_unordered` can't prove
-    // a borrowed argument outlives the out-of-order stream (a higher-ranked
-    // lifetime error otherwise).
-    type Job = (String, Option<String>, Option<String>, String);
+    // Deterministic notification charges — no LLM.
+    for c in screen.candidates.iter().filter(|c| c.notif.is_some()) {
+        let n = c.notif.as_ref().unwrap();
+        records.push(ChargeRecord {
+            message_id: c.id.clone(),
+            sender: c.sender.clone(),
+            subject: c.subject.clone(),
+            month: c.year_month,
+            merchant_raw: n.merchant_raw.clone(),
+            display_name: None,
+            amount_minor: n.amount_minor,
+            currency: n.currency.clone(),
+            billing_cycle: None,
+            kind: n.kind,
+        });
+        processed += 1;
+    }
+    progress(&Progress {
+        phase: "extracting",
+        processed,
+        total,
+        created: 0,
+        skipped_classified,
+        skipped_seen: screen.skipped_seen,
+        skipped_blocked: screen.skipped_blocked,
+    });
+
+    // Freeform receipts — one LLM call each, concurrently.
+    type Job = (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<(i32, u32)>,
+        String,
+    );
     let jobs: Vec<Job> = screen
         .candidates
         .iter()
+        .filter(|c| c.is_freeform())
         .map(|c| {
             (
                 c.id.clone(),
                 c.subject.clone(),
                 c.sender.clone(),
+                c.year_month,
                 c.body.clone(),
             )
         })
         .collect();
     let futs = jobs
         .into_iter()
-        .map(|(id, subject, sender, body)| async move {
+        .map(|(id, subject, sender, month, body)| async move {
             let hint = super::extract_from_text(llm, body).await;
-            (id, subject, sender, hint)
+            (id, subject, sender, month, hint)
         });
     let mut stream = futures::stream::iter(futs).buffer_unordered(concurrency);
 
-    while let Some((id, subject, sender, hint)) = stream.next().await {
+    while let Some((id, subject, sender, month, hint)) = stream.next().await {
         if cancel.load(Ordering::Relaxed) {
             return Err(Error::Parser(CANCELLED.to_string()));
         }
         processed += 1;
         match hint {
             Ok(Some(h)) => {
-                let payload = serde_json::to_value(&h).map_err(Error::from)?;
-                let ev = DetectionEvent {
-                    id: uuid::Uuid::now_v7(),
-                    source: DetectionSource::Gmail,
-                    source_ref: Some(id),
-                    raw_summary: Some(subject.unwrap_or_else(|| "(no subject)".to_string())),
+                let merchant_raw = h
+                    .service_name
+                    .clone()
+                    .or_else(|| sender.clone())
+                    .unwrap_or_default();
+                records.push(ChargeRecord {
+                    message_id: id,
                     sender,
-                    parsed_payload: payload,
-                    confidence: 0.0,
-                    status: DetectionStatus::Pending,
-                    matched_subscription_id: None,
-                    reviewed_at: None,
-                    created_at: Utc::now(),
-                };
-                db::detection_events::insert(pool, &ev).await?;
-                created += 1;
+                    subject,
+                    month,
+                    merchant_raw,
+                    display_name: h.service_name.clone(),
+                    amount_minor: h.amount_minor,
+                    currency: h.currency.clone(),
+                    billing_cycle: h.billing_cycle,
+                    kind: SourceKind::MerchantReceipt,
+                });
             }
             Ok(None) => skipped_classified += 1,
             Err(e) => {
@@ -410,11 +604,46 @@ pub async fn extract<P: FnMut(&Progress)>(
             phase: "extracting",
             processed,
             total,
-            created,
+            created: 0,
             skipped_classified,
             skipped_seen: screen.skipped_seen,
             skipped_blocked: screen.skipped_blocked,
         });
+    }
+
+    // Aggregate by merchant and insert one detection per subscription-like merchant.
+    let mut created = 0;
+    for cand in aggregate(records) {
+        if !cand.looks_like_subscription() {
+            continue;
+        }
+        let source_ref = format!("merchant:{}", cand.brand_key);
+        if db::detection_events::find_by_source_ref(pool, DetectionSource::Gmail, &source_ref)
+            .await?
+            .is_some()
+        {
+            continue; // already surfaced in a prior scan
+        }
+        let payload = serde_json::to_value(cand.to_hint()).map_err(Error::from)?;
+        let ev = DetectionEvent {
+            id: uuid::Uuid::now_v7(),
+            source: DetectionSource::Gmail,
+            source_ref: Some(source_ref),
+            raw_summary: cand.sample_subject.clone(),
+            sender: cand.sample_sender.clone(),
+            parsed_payload: payload,
+            confidence: if cand.recurring && cand.amount_stable {
+                0.9
+            } else {
+                0.5
+            },
+            status: DetectionStatus::Pending,
+            matched_subscription_id: None,
+            reviewed_at: None,
+            created_at: Utc::now(),
+        };
+        db::detection_events::insert(pool, &ev).await?;
+        created += 1;
     }
 
     Ok(ExtractCounts {
@@ -422,4 +651,113 @@ pub async fn extract<P: FnMut(&Progress)>(
         skipped_classified,
         skipped_extract,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rec(merchant: &str, amt: i64, ym: (i32, u32), kind: SourceKind) -> ChargeRecord {
+        ChargeRecord {
+            message_id: format!("{merchant}-{}-{}", ym.0, ym.1),
+            sender: None,
+            subject: None,
+            month: Some(ym),
+            merchant_raw: merchant.to_string(),
+            display_name: None,
+            amount_minor: Some(amt),
+            currency: Some("JPY".into()),
+            billing_cycle: None,
+            kind,
+        }
+    }
+
+    #[test]
+    fn cross_source_duplicates_collapse_to_one_merchant() {
+        // Canva charged once a month, seen via both PayPal and the Sony card line.
+        let records = vec![
+            rec(
+                "CANVA PTY LIMITED",
+                1180,
+                (2026, 1),
+                SourceKind::ProcessorNotification,
+            ),
+            rec(
+                "PAYPAL *CANVAPTYLIM",
+                1180,
+                (2026, 1),
+                SourceKind::CardNotification,
+            ),
+            rec(
+                "CANVA PTY LIMITED",
+                1180,
+                (2026, 2),
+                SourceKind::ProcessorNotification,
+            ),
+            rec(
+                "PAYPAL *CANVAPTYLIM",
+                1180,
+                (2026, 2),
+                SourceKind::CardNotification,
+            ),
+        ];
+        let aggs = aggregate(records);
+        assert_eq!(aggs.len(), 1, "all Canva charges cluster into one merchant");
+        let c = &aggs[0];
+        assert_eq!(c.months, 2);
+        assert!(c.recurring && c.amount_stable);
+        assert!(c.looks_like_subscription());
+    }
+
+    #[test]
+    fn variable_amount_shopping_is_not_a_subscription() {
+        // Amazon: recurs every month but amounts vary and there are many charges.
+        let mut records = Vec::new();
+        for (i, m) in (1..=9).enumerate() {
+            for k in 0..6 {
+                records.push(rec(
+                    "AMAZON CO JP",
+                    400 + (i * 100 + k) as i64,
+                    (2026, m),
+                    SourceKind::CardNotification,
+                ));
+            }
+        }
+        let aggs = aggregate(records);
+        assert_eq!(aggs.len(), 1);
+        assert!(
+            !aggs[0].looks_like_subscription(),
+            "variable high-frequency spend rejected"
+        );
+    }
+
+    #[test]
+    fn single_merchant_receipt_surfaces() {
+        let aggs = aggregate(vec![rec(
+            "Anthropic",
+            3000,
+            (2026, 6),
+            SourceKind::MerchantReceipt,
+        )]);
+        assert!(aggs[0].looks_like_subscription());
+    }
+
+    #[test]
+    fn distinct_merchants_stay_separate() {
+        let aggs = aggregate(vec![
+            rec(
+                "GOOGLE*APPLE MUSIC",
+                1080,
+                (2026, 1),
+                SourceKind::CardNotification,
+            ),
+            rec(
+                "GOOGLE*FITBIT",
+                640,
+                (2026, 1),
+                SourceKind::CardNotification,
+            ),
+        ]);
+        assert_eq!(aggs.len(), 2);
+    }
 }

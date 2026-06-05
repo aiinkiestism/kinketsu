@@ -14,12 +14,19 @@ use crate::models::BillingCycle;
 use crate::{Error, Result};
 
 pub mod gmail;
+pub mod merchant;
 pub mod money_gate;
+pub mod notifications;
 pub mod redact;
 pub mod scan;
 
 /// Structured output of the extraction pipeline. Every field is optional because
 /// real-world receipts vary widely in what they expose.
+///
+/// The trailing fields are populated by the merchant-keyed aggregator
+/// ([`scan`](crate::parsers::scan)) rather than the LLM — they carry the
+/// recurrence evidence behind a detection. They deserialize to `None` for
+/// LLM/CSV payloads that don't include them.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ParsedSubscriptionHint {
     pub service_name: Option<String>,
@@ -28,6 +35,18 @@ pub struct ParsedSubscriptionHint {
     pub billing_cycle: Option<BillingCycle>,
     pub payment_method_hint: Option<String>,
     pub charged_at: Option<NaiveDate>,
+    /// Distinct months this merchant was charged in the scanned range.
+    #[serde(default)]
+    pub months_seen: Option<u32>,
+    /// Total charges aggregated for this merchant.
+    #[serde(default)]
+    pub occurrences: Option<u32>,
+    /// True when seen in ≥2 distinct months.
+    #[serde(default)]
+    pub recurring: Option<bool>,
+    /// Which source the canonical record came from.
+    #[serde(default)]
+    pub source_kind: Option<notifications::SourceKind>,
 }
 
 const SYSTEM_PROMPT: &str = "You are evaluating an email to decide whether it represents a real recurring subscription, then extracting structured fields only if it is.\n\nFirst set `is_subscription`:\n- TRUE only when the email is a direct billing or renewal notification from the merchant itself for a recurring service (Netflix renewal, Spotify monthly charge, Adobe invoice, GitHub Pro receipt, Canva invoice, U-NEXT / dマガジン / 日経電子版 / 月額 or 年額 plans, etc.).\n- FALSE for any of: one-off purchases (Starbucks coffee, Uber Eats meals, single retail/EC orders, single in-app purchases that are not labeled as recurring), promotional emails / newsletters / job-board digests, generic transactional confirmations that aren't recurring (shipping notifications, password resets), and *critically* BANK or CARD ISSUER notifications about a third-party charge (e.g. \"ソニー銀行 WALLET ご利用のお知らせ\", \"Visa was used at SPOTIFY\", \"Your card was charged ¥980 at MERCHANT\"). The bank notification is not itself the subscription — the user tracks the merchant's own renewal email separately.\n\nWhen `is_subscription` is FALSE, return ONLY { \"is_subscription\": false } — omit every other field. Downstream code will skip the entry.\n\nWhen `is_subscription` is TRUE, also fill the structured fields below.\n\nField conventions: Use ISO 4217 currency codes (e.g. JPY, USD). For `amount_minor`, return an INTEGER in the smallest unit of the currency — yen for JPY (no decimals), cents for USD/EUR/etc — never a string. `billing_cycle` must be one of: weekly, monthly, quarterly, semi_annual, annual, custom. `charged_at` is the ISO 8601 date the charge applies to (YYYY-MM-DD).\n\nCRITICAL rules for missing data: If any field other than `is_subscription` is not clearly present in the text, OMIT THE PROPERTY ENTIRELY. Do NOT emit placeholder strings such as \"<UNKNOWN>\", \"unknown\", \"N/A\", \"null\", \"?\", \"-\", or empty strings — they break downstream type validation.";

@@ -387,7 +387,12 @@
 				{#each pendingReview.slice(0, 5) as ev (ev.id)}
 					<li class="glass review-row">
 						<div class="review-main">
-							<span class="review-name">{ev.parsed_payload.service_name ?? '—'}</span>
+							<span class="review-name">
+								{ev.parsed_payload.service_name ?? '—'}
+								{#if ev.parsed_payload.recurring && ev.parsed_payload.months_seen}
+									<span class="recur-pill">{tn('inbox.recurring_pill', ev.parsed_payload.months_seen)}</span>
+								{/if}
+							</span>
 							<span class="review-amt">
 								{detMoney(ev.parsed_payload.amount_minor, ev.parsed_payload.currency)}
 								{#if ev.parsed_payload.billing_cycle}
@@ -894,6 +899,16 @@
 	}
 	.review-name {
 		font-weight: 600;
+	}
+	.recur-pill {
+		font-size: 0.7rem;
+		padding: 0.1rem 0.45rem;
+		margin-left: 0.4rem;
+		border-radius: 999px;
+		background: oklch(0.82 0.13 155 / 0.18);
+		color: var(--color-accent-matcha);
+		font-weight: 600;
+		white-space: nowrap;
 	}
 	.review-amt {
 		font-size: 0.85rem;

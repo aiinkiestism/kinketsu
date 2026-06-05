@@ -491,6 +491,11 @@
 					>
 				</div>
 				<p class="est-targets">{tn('inbox.preview_llm', est.llm_targets)}</p>
+				{#if est.notification_hits > 0}
+					<p class="muted small">
+						{t('inbox.preview_free_notifications', { count: est.notification_hits })}
+					</p>
+				{/if}
 				<p class="muted small">
 					{t('inbox.preview_excluded', {
 						seen: est.skipped_seen,
@@ -567,6 +572,14 @@
 							<div class="event-head">
 								<h3>{ev.parsed_payload.service_name ?? '—'}</h3>
 								<span class="source-tag">{sourceLabel(ev.source)}</span>
+								{#if ev.parsed_payload.recurring && ev.parsed_payload.months_seen}
+									<span class="recur-pill"
+										>{tn('inbox.recurring_pill', ev.parsed_payload.months_seen)}</span
+									>
+								{/if}
+								{#if ev.parsed_payload.source_kind}
+									<span class="kind-tag">{t(`source_kind.${ev.parsed_payload.source_kind}`)}</span>
+								{/if}
 							</div>
 							<p class="event-detail">
 								{formatMoney(ev.parsed_payload.amount_minor, ev.parsed_payload.currency)}
@@ -1003,13 +1016,23 @@
 		font-size: 1rem;
 		font-weight: 600;
 	}
-	.source-tag {
+	.source-tag,
+	.kind-tag {
 		font-size: 0.7rem;
 		padding: 0.15rem 0.5rem;
 		border-radius: 999px;
 		background: var(--kk-surface-2);
 		border: 1px solid var(--kk-stroke);
 		color: var(--kk-text-muted);
+	}
+	.recur-pill {
+		font-size: 0.7rem;
+		padding: 0.15rem 0.5rem;
+		border-radius: 999px;
+		background: oklch(0.82 0.13 155 / 0.18);
+		color: var(--color-accent-matcha);
+		font-weight: 600;
+		white-space: nowrap;
 	}
 	.event-detail {
 		margin: 0.35rem 0 0;

@@ -25,15 +25,16 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 /// non-English subscription mail the classifier misses.
 const PURCHASES_FILTER: &str = " category:purchases";
 
-/// Stage 1 (default) — high precision query. Only subscription-specific
-/// vocabulary so one-off Starbucks / Uber Eats / retail receipts don't enter
-/// the LLM pipeline at all.
-pub const TIGHT_KEYWORDS: &str = "(subscription OR renewal OR \"auto-renewal\" OR \"recurring payment\" OR \"recurring charge\" OR 更新 OR 定期 OR サブスク OR 月額 OR 年額)";
+/// Stage 1 (default) — recall-favoring payment vocabulary. Captures the
+/// card/bank usage notifications and merchant receipts that actually carry
+/// recurring charges (the merchant-keyed aggregator squeezes out the noise
+/// downstream, so precision here matters less than coverage).
+pub const TIGHT_KEYWORDS: &str = "(receipt OR invoice OR subscription OR renewal OR \"recurring payment\" OR \"自動支払い\" OR \"ご利用のお知らせ\" OR \"ご利用明細\" OR \"ご利用代金\" OR 領収 OR 請求 OR お支払い OR 月額 OR 年額 OR サブスク)";
 
-/// Stage 2 (deeper, opt-in) — broader catch-all that picks up generic
-/// receipts and invoices. Used together with a recurrence filter so the
-/// extra noise gets squeezed out downstream.
-pub const BROAD_KEYWORDS: &str = "(invoice OR receipt OR subscription OR \"recurring payment\" OR renewal OR \"請求\" OR \"明細\" OR \"領収\" OR 更新 OR 定期 OR サブスク OR 月額 OR 年額)";
+/// Stage 2 (deeper, opt-in) — broader catch-all that also pulls order
+/// confirmations and statements. Noisier, but the aggregator still keys on
+/// recurring merchants.
+pub const BROAD_KEYWORDS: &str = "(receipt OR invoice OR subscription OR renewal OR payment OR statement OR \"自動支払い\" OR \"ご利用のお知らせ\" OR \"ご利用明細\" OR \"ご利用代金\" OR 領収 OR 請求 OR 明細 OR お支払い OR ご注文 OR 決済 OR 月額 OR 年額 OR 更新 OR 定期 OR サブスク)";
 
 const BODY_CHAR_LIMIT: usize = 8000;
 

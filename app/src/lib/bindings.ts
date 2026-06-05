@@ -216,6 +216,11 @@ export type OAuthCredentials = {
 /**
  *  Structured output of the extraction pipeline. Every field is optional because
  *  real-world receipts vary widely in what they expose.
+ * 
+ *  The trailing fields are populated by the merchant-keyed aggregator
+ *  ([`scan`](crate::parsers::scan)) rather than the LLM — they carry the
+ *  recurrence evidence behind a detection. They deserialize to `None` for
+ *  LLM/CSV payloads that don't include them.
  */
 export type ParsedSubscriptionHint = {
 	service_name: string | null,
@@ -224,6 +229,14 @@ export type ParsedSubscriptionHint = {
 	billing_cycle: BillingCycle | null,
 	payment_method_hint: string | null,
 	charged_at: string | null,
+	// Distinct months this merchant was charged in the scanned range.
+	months_seen?: number | null,
+	// Total charges aggregated for this merchant.
+	occurrences?: number | null,
+	// True when seen in ≥2 distinct months.
+	recurring?: boolean | null,
+	// Which source the canonical record came from.
+	source_kind?: SourceKind | null,
 };
 
 export type PaymentMethod = {
@@ -245,17 +258,20 @@ export type PaymentMethodKind = "credit_card" | "debit_card" | "bank_account" | 
 
 // Cost + counts preview returned to the UI before a scan commits to LLM spend.
 export type ScanEstimate = {
-	// Gmail's rough total for the query (can exceed `listed` when capped).
 	matched_estimate: number,
-	// Messages actually fetched + screened (≤ `max_fetch`).
 	listed: number,
 	skipped_seen: number,
 	skipped_blocked: number,
 	skipped_no_body: number,
 	skipped_no_amount: number,
 	skipped_recurrence: number,
-	// Survivors that will each cost one LLM call.
+	/**
+	 *  Freeform receipts that will each cost one LLM call. Bank/card/processor
+	 *  notifications are parsed deterministically and cost nothing.
+	 */
 	llm_targets: number,
+	// Messages parsed from notification templates (free).
+	notification_hits: number,
 	truncated_by_max_llm: boolean,
 	input_tokens: number,
 	output_tokens_est: number,
@@ -263,12 +279,7 @@ export type ScanEstimate = {
 	cost_high_usd: number,
 	provider: string,
 	model: string,
-	// True for Ollama / LM Studio — cost is zero.
 	is_local: boolean,
-	/**
-	 *  How the figures were derived. Always `"approximate"` for now (heuristic
-	 *  token count + list prices); surfaced so the UI can say so.
-	 */
 	exactness: string,
 };
 
@@ -299,6 +310,18 @@ export type ScanSummary = {
 	skipped_classified: number,
 	skipped_recurrence: number,
 };
+
+/**
+ *  Where a charge record came from. Drives cross-source de-duplication
+ *  preference (a merchant's own receipt wins over a processor or card line).
+ */
+export type SourceKind = 
+// The merchant's own receipt / invoice email.
+"merchant_receipt" | 
+// A payment processor's notice (PayPal, Stripe, Braintree).
+"processor_notification" | 
+// A bank / card-issuer usage notification.
+"card_notification";
 
 export type Subscription = {
 	id: string,

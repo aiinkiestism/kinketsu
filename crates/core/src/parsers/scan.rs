@@ -217,10 +217,53 @@ fn source_rank(k: SourceKind) -> u8 {
     }
 }
 
+/// Map the typical interval (in months) between charges to a billing cycle.
+fn cycle_from_gap(gap_months: i32) -> BillingCycle {
+    match gap_months {
+        ..=1 => BillingCycle::Monthly,
+        2..=4 => BillingCycle::Quarterly,
+        5..=8 => BillingCycle::SemiAnnual,
+        _ => BillingCycle::Annual,
+    }
+}
+
+/// Infer the billing cycle for a merchant from the months it was charged.
+///
+/// - An explicit cycle (extracted by the LLM from receipt text) always wins.
+/// - With ≥2 charges, the **smallest** gap between consecutive charge-months is
+///   the cycle — using the minimum (not the average) keeps a monthly sub with a
+///   couple of missing receipts from looking quarterly.
+/// - A lone charge across a long scan is almost certainly not monthly (a
+///   monthly sub would appear many times), so it's treated as annual — this is
+///   how once-a-year subs like Uber One get the right cycle.
+fn infer_cycle(
+    sorted_abs_months: &[i32],
+    range_months: usize,
+    explicit: Option<BillingCycle>,
+) -> BillingCycle {
+    if let Some(c) = explicit {
+        return c;
+    }
+    if sorted_abs_months.len() >= 2 {
+        let min_gap = sorted_abs_months
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .min()
+            .unwrap_or(1);
+        return cycle_from_gap(min_gap);
+    }
+    if sorted_abs_months.len() == 1 && range_months >= 6 {
+        return BillingCycle::Annual;
+    }
+    BillingCycle::Monthly
+}
+
 /// Cluster charge records by merchant and summarize each into a subscription
 /// candidate. Cross-source duplicates of the same charge collapse here.
+/// `range_months` is the number of months the scan covered, used to tell a
+/// once-a-year charge apart from a just-started monthly one.
 #[must_use]
-pub fn aggregate(records: Vec<ChargeRecord>) -> Vec<SubscriptionCandidate> {
+pub fn aggregate(records: Vec<ChargeRecord>, range_months: usize) -> Vec<SubscriptionCandidate> {
     // Greedy clustering by brand similarity.
     let mut clusters: Vec<Vec<ChargeRecord>> = Vec::new();
     for r in records {
@@ -260,9 +303,27 @@ pub fn aggregate(records: Vec<ChargeRecord>) -> Vec<SubscriptionCandidate> {
             .display_name
             .clone()
             .unwrap_or_else(|| merchant::display_clean(&best.merchant_raw));
-        let currency = cl.iter().find_map(|r| r.currency.clone());
-        let amount_minor = top.map(|(a, _)| a).or(best.amount_minor);
-        let billing_cycle = cl.iter().find_map(|r| r.billing_cycle);
+        // Currency follows the best source; the amount is the **highest** seen in
+        // that currency over the range (subscriptions whose charge varies month to
+        // month — FX, usage tiers — surface at their peak, per the user's ask).
+        let currency = best
+            .currency
+            .clone()
+            .or_else(|| cl.iter().find_map(|r| r.currency.clone()));
+        let amount_minor = cl
+            .iter()
+            .filter(|r| r.currency == currency)
+            .filter_map(|r| r.amount_minor)
+            .max()
+            .or(best.amount_minor);
+        // Infer the cycle from the charge intervals (not a blanket "monthly").
+        let mut abs_months: Vec<i32> = months.iter().map(|(y, m)| y * 12 + *m as i32).collect();
+        abs_months.sort_unstable();
+        let billing_cycle = Some(infer_cycle(
+            &abs_months,
+            range_months,
+            cl.iter().find_map(|r| r.billing_cycle),
+        ));
         let kind = cl
             .iter()
             .map(|r| r.kind)
@@ -317,11 +378,7 @@ impl SubscriptionCandidate {
             service_name: Some(self.name.clone()),
             amount_minor: self.amount_minor,
             currency: self.currency.clone(),
-            billing_cycle: self.billing_cycle.or(if self.recurring {
-                Some(BillingCycle::Monthly)
-            } else {
-                None
-            }),
+            billing_cycle: self.billing_cycle,
             payment_method_hint: None,
             charged_at: None,
             months_seen: Some(u32::try_from(self.months).unwrap_or(u32::MAX)),
@@ -502,6 +559,7 @@ pub async fn extract<P: FnMut(&Progress)>(
     pool: &SqlitePool,
     llm: &LlmClient,
     screen: &ScreenResult,
+    range_months: usize,
     concurrency: usize,
     cancel: &AtomicBool,
     mut progress: P,
@@ -613,7 +671,7 @@ pub async fn extract<P: FnMut(&Progress)>(
 
     // Aggregate by merchant and insert one detection per subscription-like merchant.
     let mut created = 0;
-    for cand in aggregate(records) {
+    for cand in aggregate(records, range_months) {
         if !cand.looks_like_subscription() {
             continue;
         }
@@ -701,12 +759,13 @@ mod tests {
                 SourceKind::CardNotification,
             ),
         ];
-        let aggs = aggregate(records);
+        let aggs = aggregate(records, 12);
         assert_eq!(aggs.len(), 1, "all Canva charges cluster into one merchant");
         let c = &aggs[0];
         assert_eq!(c.months, 2);
         assert!(c.recurring && c.amount_stable);
         assert!(c.looks_like_subscription());
+        assert_eq!(c.billing_cycle, Some(BillingCycle::Monthly));
     }
 
     #[test]
@@ -723,7 +782,7 @@ mod tests {
                 ));
             }
         }
-        let aggs = aggregate(records);
+        let aggs = aggregate(records, 12);
         assert_eq!(aggs.len(), 1);
         assert!(
             !aggs[0].looks_like_subscription(),
@@ -733,31 +792,100 @@ mod tests {
 
     #[test]
     fn single_merchant_receipt_surfaces() {
-        let aggs = aggregate(vec![rec(
-            "Anthropic",
-            3000,
-            (2026, 6),
-            SourceKind::MerchantReceipt,
-        )]);
+        let aggs = aggregate(
+            vec![rec(
+                "Anthropic",
+                3000,
+                (2026, 6),
+                SourceKind::MerchantReceipt,
+            )],
+            1,
+        );
         assert!(aggs[0].looks_like_subscription());
     }
 
     #[test]
     fn distinct_merchants_stay_separate() {
-        let aggs = aggregate(vec![
-            rec(
-                "GOOGLE*APPLE MUSIC",
-                1080,
-                (2026, 1),
-                SourceKind::CardNotification,
-            ),
-            rec(
-                "GOOGLE*FITBIT",
-                640,
-                (2026, 1),
-                SourceKind::CardNotification,
-            ),
-        ]);
+        let aggs = aggregate(
+            vec![
+                rec(
+                    "GOOGLE*APPLE MUSIC",
+                    1080,
+                    (2026, 1),
+                    SourceKind::CardNotification,
+                ),
+                rec(
+                    "GOOGLE*FITBIT",
+                    640,
+                    (2026, 1),
+                    SourceKind::CardNotification,
+                ),
+            ],
+            1,
+        );
         assert_eq!(aggs.len(), 2);
+    }
+
+    #[test]
+    fn amount_uses_highest_in_range() {
+        // A sub whose charge drifts (FX / usage) surfaces at its peak.
+        let aggs = aggregate(
+            vec![
+                rec("Cursor", 3200, (2026, 1), SourceKind::CardNotification),
+                rec("Cursor", 3550, (2026, 2), SourceKind::CardNotification),
+                rec("Cursor", 3244, (2026, 3), SourceKind::CardNotification),
+            ],
+            12,
+        );
+        assert_eq!(aggs[0].amount_minor, Some(3550));
+    }
+
+    #[test]
+    fn cycle_inferred_from_intervals() {
+        // Consecutive months → monthly.
+        let monthly = aggregate(
+            vec![
+                rec("A", 100, (2026, 1), SourceKind::CardNotification),
+                rec("A", 100, (2026, 2), SourceKind::CardNotification),
+                rec("A", 100, (2026, 3), SourceKind::CardNotification),
+            ],
+            12,
+        );
+        assert_eq!(monthly[0].billing_cycle, Some(BillingCycle::Monthly));
+
+        // Every third month → quarterly.
+        let quarterly = aggregate(
+            vec![
+                rec("B", 100, (2026, 1), SourceKind::CardNotification),
+                rec("B", 100, (2026, 4), SourceKind::CardNotification),
+                rec("B", 100, (2026, 7), SourceKind::CardNotification),
+            ],
+            12,
+        );
+        assert_eq!(quarterly[0].billing_cycle, Some(BillingCycle::Quarterly));
+
+        // A lone charge across a 12-month scan → annual (e.g. Uber One).
+        let annual = aggregate(
+            vec![rec(
+                "Uber One",
+                9800,
+                (2026, 3),
+                SourceKind::CardNotification,
+            )],
+            12,
+        );
+        assert_eq!(annual[0].billing_cycle, Some(BillingCycle::Annual));
+
+        // The same lone charge in a 1-month scan stays monthly (can't tell yet).
+        let short = aggregate(
+            vec![rec(
+                "Uber One",
+                9800,
+                (2026, 3),
+                SourceKind::CardNotification,
+            )],
+            1,
+        );
+        assert_eq!(short[0].billing_cycle, Some(BillingCycle::Monthly));
     }
 }

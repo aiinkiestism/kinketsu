@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
     }
     eprintln!("parsed {} notification charges\n", records.len());
 
-    let mut cands = aggregate(records);
+    let mut cands = aggregate(records, 12);
     cands.sort_by_key(|c| {
         (
             std::cmp::Reverse(c.looks_like_subscription()),
@@ -98,8 +98,8 @@ async fn main() -> anyhow::Result<()> {
         .collect();
     println!("=== SUBSCRIPTIONS ({}) ===", subs.len());
     println!(
-        "{:>2} {:>4} {:>9} {:>5}  name",
-        "mo", "occ", "amount", "src"
+        "{:>2} {:>4} {:>11} {:>5} {:>10}  name",
+        "mo", "occ", "amount", "src", "cycle"
     );
     for c in &subs {
         let amt = c
@@ -107,11 +107,12 @@ async fn main() -> anyhow::Result<()> {
             .map(|a| format!("{} {}", a, c.currency.as_deref().unwrap_or("")))
             .unwrap_or_default();
         println!(
-            "{:>2} {:>4} {:>9} {:>5}  {}",
+            "{:>2} {:>4} {:>11} {:>5} {:>10?}  {}",
             c.months,
             c.occurrences,
             amt,
             kind(c.kind),
+            c.billing_cycle,
             c.name
         );
     }

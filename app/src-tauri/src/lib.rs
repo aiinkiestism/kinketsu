@@ -446,6 +446,7 @@ async fn do_scan(
 
     state.scan_cancel.store(false, Ordering::Relaxed);
 
+    let range_months = range.len();
     let signature = scan_signature(&range, &scan_opts);
     let screen = match take_cached_screen(&state, &signature) {
         Some(cached) => cached,
@@ -473,6 +474,7 @@ async fn do_scan(
         &state.pool,
         &llm,
         &screen,
+        range_months,
         scan_opts.concurrency,
         &state.scan_cancel,
         make_scan_emit(&app),

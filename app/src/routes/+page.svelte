@@ -381,7 +381,7 @@
 					{t('dashboard.review_heading')}
 					<span class="review-badge">{pendingReview.length}</span>
 				</h2>
-				<a class="glass-subtle pill-btn" href="/inbox">{t('dashboard.review_view_all')}</a>
+				<a class="glass-subtle pill-btn" href="/review">{t('dashboard.review_view_all')}</a>
 			</div>
 			<ul class="review-list">
 				{#each pendingReview.slice(0, 5) as ev (ev.id)}

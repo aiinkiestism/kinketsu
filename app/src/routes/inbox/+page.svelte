@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { SvelteSet } from 'svelte/reactivity';
-	import { detectionEvents } from '$lib/stores/detection_events.svelte';
 	import { gmail } from '$lib/stores/gmail.svelte';
 	import { paypal } from '$lib/stores/paypal.svelte';
 	import { llmConfig } from '$lib/stores/llm_config.svelte';
@@ -9,14 +7,7 @@
 	import MonthRangeSelect from '$lib/components/MonthRangeSelect.svelte';
 	import ErrorDialog from '$lib/components/ErrorDialog.svelte';
 	import Tooltip from '$lib/components/Tooltip.svelte';
-	import { CURRENCIES } from '$lib/constants';
-	import type {
-		BillingCycle,
-		DetectionEvent,
-		DetectionSource,
-		ScanOptsDto,
-		YearMonthDto
-	} from '$lib/bindings';
+	import type { ScanOptsDto, YearMonthDto } from '$lib/bindings';
 
 	type ScanErrorInfo = {
 		title: string;
@@ -63,60 +54,6 @@
 		};
 	}
 
-	let editingEvent = $state<DetectionEvent | null>(null);
-	let editName = $state('');
-	let editAmount = $state<number>(0);
-	let editCurrency = $state('JPY');
-	let editCycle = $state<BillingCycle>('monthly');
-	let editNextBilling = $state('');
-
-	function toMinor(amount: number, currency: string): number {
-		return currency === 'JPY' ? Math.round(amount) : Math.round(amount * 100);
-	}
-
-	function fromMinor(amount_minor: number, currency: string): number {
-		return currency === 'JPY' ? amount_minor : amount_minor / 100;
-	}
-
-	function startEditEvent(ev: DetectionEvent) {
-		editingEvent = ev;
-		editName = ev.parsed_payload.service_name ?? '';
-		editCurrency = ev.parsed_payload.currency ?? 'JPY';
-		editAmount = ev.parsed_payload.amount_minor !== null
-			? fromMinor(ev.parsed_payload.amount_minor, editCurrency)
-			: 0;
-		editCycle = ev.parsed_payload.billing_cycle ?? 'monthly';
-		editNextBilling = '';
-	}
-
-	function cancelEditEvent() {
-		editingEvent = null;
-	}
-
-	async function saveEditEvent(ev: DetectionEvent) {
-		if (!editName.trim()) return;
-		try {
-			await detectionEvents.confirmWithOverrides(ev.id, {
-				name: editName.trim(),
-				service_icon: null,
-				plan: null,
-				amount_minor: toMinor(editAmount, editCurrency),
-				currency: editCurrency,
-				billing_cycle: editCycle,
-				next_billing_date: editNextBilling || null,
-				started_at: ev.parsed_payload.charged_at,
-				payment_method_id: null,
-				category_id: null,
-				status: null,
-				notes: ev.parsed_payload.payment_method_hint
-					? `Payment hint: ${ev.parsed_payload.payment_method_hint}`
-					: null
-			});
-			editingEvent = null;
-		} catch {
-			/* error in store */
-		}
-	}
 
 	let scanRange = $state<YearMonthDto[]>([]);
 	let scanFeedback = $state<string | null>(null);
@@ -202,7 +139,6 @@
 			} else {
 				scanFeedback = tn('inbox.scan_complete', created);
 			}
-			await detectionEvents.load();
 		} catch (e) {
 			const raw = gmail.error ?? String(e);
 			// Short, friendly errors stay inline; everything else gets the modal.
@@ -232,61 +168,6 @@
 		await gmail.cancelScan();
 	}
 
-	let pending = $derived(detectionEvents.items.filter((e) => e.status === 'pending'));
-	let selectedIds = $state(new SvelteSet<string>());
-	let allSelected = $derived(pending.length > 0 && pending.every((p) => selectedIds.has(p.id)));
-
-	function toggleSelected(id: string, on: boolean) {
-		if (on) selectedIds.add(id);
-		else selectedIds.delete(id);
-	}
-
-	function toggleSelectAll() {
-		if (allSelected) {
-			selectedIds.clear();
-		} else {
-			for (const p of pending) selectedIds.add(p.id);
-		}
-	}
-
-	async function handleBulkReject() {
-		const ids = Array.from(selectedIds);
-		if (ids.length === 0) return;
-		const n = await detectionEvents.bulkReject(ids);
-		selectedIds.clear();
-		if (n > 0) scanFeedback = tn('inbox.bulk_rejected', n);
-	}
-	let reviewed = $derived(
-		detectionEvents.items.filter((e) => e.status !== 'pending').slice(0, 20)
-	);
-
-	function formatTimestamp(iso: string): string {
-		try {
-			return new Intl.DateTimeFormat(i18n.bcp47, {
-				dateStyle: 'medium',
-				timeStyle: 'short'
-			}).format(new Date(iso));
-		} catch {
-			return iso;
-		}
-	}
-
-	function formatMoney(amount_minor: number | null, currency: string | null): string {
-		if (amount_minor === null || !currency) return '—';
-		try {
-			return new Intl.NumberFormat(i18n.bcp47, {
-				style: 'currency',
-				currency,
-				maximumFractionDigits: currency === 'JPY' ? 0 : 2
-			}).format(fromMinor(amount_minor, currency));
-		} catch {
-			return `${amount_minor} ${currency}`;
-		}
-	}
-
-	function sourceLabel(s: DetectionSource): string {
-		return t(`source.${s}`);
-	}
 
 	async function handleConnectPaypal() {
 		try {
@@ -300,7 +181,6 @@
 	}
 
 	onMount(() => {
-		detectionEvents.load();
 		gmail.load();
 		paypal.load();
 		llmConfig.load();
@@ -530,155 +410,6 @@
 		{/if}
 	</section>
 
-	<section class="list-section">
-		<h2>{t('inbox.pending_heading')}</h2>
-		{#if detectionEvents.loading}
-			<p class="muted">{t('common.loading')}</p>
-		{:else if pending.length === 0}
-			<article class="glass card empty">
-				<p class="muted">{t('inbox.empty')}</p>
-			</article>
-		{:else}
-			<div class="bulk-bar">
-				<label class="bulk-select-all">
-					<input
-						type="checkbox"
-						checked={allSelected}
-						indeterminate={selectedIds.size > 0 && !allSelected}
-						onchange={toggleSelectAll}
-					/>
-					<span>{t('inbox.bulk_select_all')}</span>
-				</label>
-				{#if selectedIds.size > 0}
-					<span class="bulk-count muted small">
-						{t('inbox.bulk_selected', { count: selectedIds.size })}
-					</span>
-					<button type="button" class="bulk-reject" onclick={handleBulkReject}>
-						{t('inbox.bulk_reject')}
-					</button>
-				{/if}
-			</div>
-			<ul class="events">
-				{#each pending as ev (ev.id)}
-					<li class="glass event-row">
-						<input
-							type="checkbox"
-							class="row-select"
-							checked={selectedIds.has(ev.id)}
-							onchange={(e) => toggleSelected(ev.id, (e.currentTarget as HTMLInputElement).checked)}
-							aria-label={t('inbox.bulk_select_row')}
-						/>
-						<div class="event-main">
-							<div class="event-head">
-								<h3>{ev.parsed_payload.service_name ?? '—'}</h3>
-								<span class="source-tag">{sourceLabel(ev.source)}</span>
-								{#if ev.parsed_payload.recurring && ev.parsed_payload.months_seen}
-									<span class="recur-pill"
-										>{tn('inbox.recurring_pill', ev.parsed_payload.months_seen)}</span
-									>
-								{/if}
-								{#if ev.parsed_payload.source_kind}
-									<span class="kind-tag">{t(`source_kind.${ev.parsed_payload.source_kind}`)}</span>
-								{/if}
-							</div>
-							<p class="event-detail">
-								{formatMoney(ev.parsed_payload.amount_minor, ev.parsed_payload.currency)}
-								{#if ev.parsed_payload.billing_cycle}
-									<span class="sep">·</span>
-									<span>{t(`cycle.${ev.parsed_payload.billing_cycle}`)}</span>
-								{/if}
-							</p>
-							{#if ev.raw_summary}
-								<p class="event-detail muted small">{ev.raw_summary}</p>
-							{/if}
-							{#if ev.parsed_payload.payment_method_hint}
-								<p class="event-detail muted small">{ev.parsed_payload.payment_method_hint}</p>
-							{/if}
-							<p class="event-detail muted small">{formatTimestamp(ev.created_at)}</p>
-
-							{#if editingEvent?.id === ev.id}
-								<div class="edit-grid">
-									<label>
-										<span>{t('form.name')}</span>
-										<input bind:value={editName} required />
-									</label>
-									<label>
-										<span>{t('form.amount')}</span>
-										<input
-											type="number"
-											bind:value={editAmount}
-											min="0"
-											step={editCurrency === 'JPY' ? '1' : '0.01'}
-										/>
-									</label>
-									<label>
-										<span>{t('form.currency')}</span>
-										<select bind:value={editCurrency}>
-											{#each CURRENCIES as c (c)}
-												<option value={c}>{c}</option>
-											{/each}
-										</select>
-									</label>
-									<label>
-										<span>{t('form.billing_cycle')}</span>
-										<select bind:value={editCycle}>
-											<option value="weekly">{t('cycle.weekly')}</option>
-											<option value="monthly">{t('cycle.monthly')}</option>
-											<option value="quarterly">{t('cycle.quarterly')}</option>
-											<option value="semi_annual">{t('cycle.semi_annual')}</option>
-											<option value="annual">{t('cycle.annual')}</option>
-											<option value="custom">{t('cycle.custom')}</option>
-										</select>
-									</label>
-									<label>
-										<span>{t('form.next_billing_date')}</span>
-										<input type="date" bind:value={editNextBilling} />
-									</label>
-								</div>
-							{/if}
-						</div>
-						<div class="event-actions">
-							{#if editingEvent?.id === ev.id}
-								<button class="confirm" onclick={() => saveEditEvent(ev)}>
-									{t('inbox.confirm')}
-								</button>
-								<button class="reject" onclick={cancelEditEvent}>
-									{t('subs.cancel')}
-								</button>
-							{:else}
-								<button class="confirm" onclick={() => detectionEvents.confirm(ev.id)}>
-									{t('inbox.confirm')}
-								</button>
-								<button class="reject" onclick={() => startEditEvent(ev)}>
-									{t('inbox.edit_confirm')}
-								</button>
-								<button class="reject" onclick={() => detectionEvents.reject(ev.id)}>
-									{t('inbox.reject')}
-								</button>
-							{/if}
-						</div>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-
-		{#if reviewed.length > 0}
-			<h2 class="reviewed-heading">{t('inbox.reviewed_heading')}</h2>
-			<ul class="events reviewed">
-				{#each reviewed as ev (ev.id)}
-					<li class="glass-subtle reviewed-row">
-						<span class="rev-name">{ev.parsed_payload.service_name ?? '—'}</span>
-						<span class="rev-status status-{ev.status}">{t(`status.${ev.status}`)}</span>
-						<span class="rev-time muted small">{formatTimestamp(ev.created_at)}</span>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-
-		{#if detectionEvents.error}
-			<p class="error">{t('common.error')}: {detectionEvents.error}</p>
-		{/if}
-	</section>
 
 	<ErrorDialog
 		bind:open={errorDialogOpen}
@@ -937,212 +668,12 @@
 		color: var(--color-accent-yuzu);
 	}
 
-	.list-section {
-		margin-top: 2rem;
-	}
-	.list-section h2 {
-		font-size: 1.05rem;
-		font-weight: 600;
-		margin: 0 0 1rem;
-	}
-	.reviewed-heading {
-		margin-top: 1.5rem;
-	}
-	.events {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		display: flex;
-		flex-direction: column;
-		gap: 0.6rem;
-	}
-	.event-row {
-		display: grid;
-		grid-template-columns: auto 1fr auto;
-		gap: 1rem;
-		padding: 1rem 1.25rem;
-		border-radius: var(--kk-radius-md);
-	}
-	.row-select {
-		align-self: start;
-		margin-top: 0.25rem;
-		width: 1rem;
-		height: 1rem;
-		cursor: pointer;
-	}
-	.bulk-bar {
-		display: flex;
-		align-items: center;
-		gap: 0.85rem;
-		flex-wrap: wrap;
-		margin-bottom: 0.75rem;
-		padding: 0.5rem 0.25rem;
-	}
-	.bulk-select-all {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.4rem;
-		font-size: 0.85rem;
-		color: var(--kk-text-muted);
-		cursor: pointer;
-	}
-	.bulk-count {
-		font-weight: 500;
-	}
-	.bulk-reject {
-		padding: 0.4rem 0.85rem;
-		border-radius: var(--kk-radius-sm);
-		border: 1px solid var(--kk-stroke);
-		background: oklch(0.82 0.13 25 / 0.18);
-		color: var(--color-accent-mochi);
-		font-weight: 600;
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.bulk-reject:hover {
-		background: oklch(0.82 0.13 25 / 0.28);
-	}
-	.event-main {
-		min-width: 0;
-	}
-	.event-head {
-		display: flex;
-		gap: 0.75rem;
-		align-items: center;
-	}
-	.event-head h3 {
-		margin: 0;
-		font-size: 1rem;
-		font-weight: 600;
-	}
-	.source-tag,
-	.kind-tag {
-		font-size: 0.7rem;
-		padding: 0.15rem 0.5rem;
-		border-radius: 999px;
-		background: var(--kk-surface-2);
-		border: 1px solid var(--kk-stroke);
-		color: var(--kk-text-muted);
-	}
-	.recur-pill {
-		font-size: 0.7rem;
-		padding: 0.15rem 0.5rem;
-		border-radius: 999px;
-		background: oklch(0.82 0.13 155 / 0.18);
-		color: var(--color-accent-matcha);
-		font-weight: 600;
-		white-space: nowrap;
-	}
-	.event-detail {
-		margin: 0.35rem 0 0;
-		font-size: 0.9rem;
-	}
-	.event-detail.muted {
-		color: var(--kk-text-muted);
-	}
-	.event-detail .sep {
-		opacity: 0.5;
-		margin: 0 0.35rem;
-	}
 	.small {
 		font-size: 0.8rem;
-	}
-	.event-actions {
-		display: flex;
-		flex-direction: column;
-		gap: 0.4rem;
-		align-self: flex-start;
-	}
-	.edit-grid {
-		display: grid;
-		grid-template-columns: repeat(2, 1fr);
-		gap: 0.6rem;
-		margin-top: 0.85rem;
-		padding-top: 0.85rem;
-		border-top: 1px solid var(--kk-stroke);
-	}
-	.edit-grid label {
-		display: flex;
-		flex-direction: column;
-		gap: 0.2rem;
-		font-size: 0.8rem;
-		color: var(--kk-text-muted);
-	}
-	.edit-grid input,
-	.edit-grid select {
-		padding: 0.4rem 0.55rem;
-		border-radius: var(--kk-radius-sm);
-		border: 1px solid var(--kk-stroke);
-		background: var(--kk-surface-2);
-		color: var(--kk-text-primary);
-		font-size: 0.85rem;
-		font-family: inherit;
-	}
-	.event-actions button {
-		padding: 0.5rem 0.85rem;
-		border-radius: var(--kk-radius-sm);
-		border: 1px solid var(--kk-stroke);
-		cursor: pointer;
-		font-family: inherit;
-		font-size: 0.85rem;
-		font-weight: 600;
-	}
-	.event-actions .confirm {
-		background: var(--color-accent-matcha);
-		color: oklch(0.15 0.05 155);
-	}
-	.event-actions .reject {
-		background: transparent;
-		color: var(--kk-text-muted);
-	}
-	.reviewed-row {
-		display: grid;
-		grid-template-columns: 1fr auto auto;
-		gap: 0.85rem;
-		align-items: center;
-		padding: 0.6rem 1rem;
-		border-radius: var(--kk-radius-sm);
-	}
-	.rev-status {
-		font-size: 0.75rem;
-		padding: 0.15rem 0.5rem;
-		border-radius: 999px;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-	.status-confirmed {
-		background: oklch(0.82 0.13 155 / 0.2);
-		color: var(--color-accent-matcha);
-	}
-	.status-rejected {
-		background: oklch(0.82 0.13 25 / 0.2);
-		color: var(--color-accent-mochi);
-	}
-	.status-duplicate {
-		background: oklch(0.74 0.15 300 / 0.2);
-		color: var(--color-accent-fuji);
-	}
-	.empty {
-		padding: 2rem;
-		text-align: center;
-	}
-	.error {
-		color: var(--color-accent-mochi);
-		margin: 1rem 0 0;
-		font-size: 0.9rem;
 	}
 	@media (max-width: 640px) {
 		.source-grid {
 			grid-template-columns: 1fr;
-		}
-		.event-row {
-			grid-template-columns: auto 1fr;
-		}
-		.event-actions {
-			flex-direction: row;
-			justify-self: start;
-			grid-column: 1 / -1;
 		}
 	}
 </style>

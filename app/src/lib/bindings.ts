@@ -25,9 +25,16 @@ export const commands = {
 	confirmDetectionEventWithOverrides: (id: string, sub: NewSubscription) => typedError<Subscription, string>(__TAURI_INVOKE("confirm_detection_event_with_overrides", { id, sub })),
 	rejectDetectionEvent: (id: string) => typedError<null, string>(__TAURI_INVOKE("reject_detection_event", { id })),
 	/**
+	 *  Un-reject a detection: put it back in the pending review queue. Used to undo
+	 *  an accidental reject.
+	 */
+	restoreDetectionEvent: (id: string) => typedError<null, string>(__TAURI_INVOKE("restore_detection_event", { id })),
+	/**
 	 *  Reject a batch of pending detection events in one round-trip. Each id is
 	 *  processed independently — same as calling `reject_detection_event` per id,
-	 *  including sender → blocklist learning. Returns the count actually rejected.
+	 *  Returns the count actually rejected. Rejected rows stay keyed by merchant
+	 *  `source_ref` so future scans skip them; no sender blocklisting (see
+	 *  `reject_detection_event`).
 	 */
 	bulkRejectDetectionEvents: (ids: string[]) => typedError<number, string>(__TAURI_INVOKE("bulk_reject_detection_events", { ids })),
 	listLearnedSenders: () => typedError<LearnedSender[], string>(__TAURI_INVOKE("list_learned_senders")),

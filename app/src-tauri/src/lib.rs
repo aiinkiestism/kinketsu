@@ -1076,24 +1076,30 @@ async fn confirm_detection_event_with_overrides(
 #[tauri::command]
 #[specta::specta]
 async fn reject_detection_event(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
-    let ev = db::detection_events::get(&state.pool, id)
-        .await
-        .map_err(|e| e.to_string())?;
-
+    // The rejected row stays in the table keyed by its merchant `source_ref`, so
+    // a future scan's `find_by_source_ref` check skips re-surfacing it — no
+    // sender blocklisting needed (and blocklisting a shared sender like a bank
+    // or Google Play would wrongly suppress every other merchant under it).
     db::detection_events::update_status(&state.pool, id, DetectionStatus::Rejected, None)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
 
-    // Learn: future scans skip this sender before paying for an LLM call.
-    if let Some(sender) = ev.and_then(|e| e.sender) {
-        let _ = db::learned_senders::upsert(&state.pool, &sender, LearnedDecision::Block).await;
-    }
-    Ok(())
+/// Un-reject a detection: put it back in the pending review queue. Used to undo
+/// an accidental reject.
+#[tauri::command]
+#[specta::specta]
+async fn restore_detection_event(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
+    db::detection_events::update_status(&state.pool, id, DetectionStatus::Pending, None)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Reject a batch of pending detection events in one round-trip. Each id is
 /// processed independently — same as calling `reject_detection_event` per id,
-/// including sender → blocklist learning. Returns the count actually rejected.
+/// Returns the count actually rejected. Rejected rows stay keyed by merchant
+/// `source_ref` so future scans skip them; no sender blocklisting (see
+/// `reject_detection_event`).
 #[tauri::command]
 #[specta::specta]
 async fn bulk_reject_detection_events(
@@ -1102,23 +1108,12 @@ async fn bulk_reject_detection_events(
 ) -> Result<usize, String> {
     let mut rejected = 0usize;
     for id in ids {
-        let ev = match db::detection_events::get(&state.pool, id).await {
-            Ok(Some(e)) => Some(e),
-            Ok(None) => None,
-            Err(e) => {
-                log::warn!("bulk reject: get({id}) failed: {e}");
-                continue;
-            }
-        };
         if let Err(e) =
             db::detection_events::update_status(&state.pool, id, DetectionStatus::Rejected, None)
                 .await
         {
             log::warn!("bulk reject: update_status({id}) failed: {e}");
             continue;
-        }
-        if let Some(sender) = ev.and_then(|e| e.sender) {
-            let _ = db::learned_senders::upsert(&state.pool, &sender, LearnedDecision::Block).await;
         }
         rejected += 1;
     }
@@ -1191,6 +1186,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         confirm_detection_event,
         confirm_detection_event_with_overrides,
         reject_detection_event,
+        restore_detection_event,
         bulk_reject_detection_events,
         list_learned_senders,
         delete_learned_sender,

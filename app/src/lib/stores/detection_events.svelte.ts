@@ -53,6 +53,16 @@ class DetectionEventsStore {
 		}
 	}
 
+	/** Undo a reject: put the detection back in the pending queue. */
+	async restore(id: string) {
+		try {
+			await invoke('restore_detection_event', { id });
+			await this.load();
+		} catch (e) {
+			this.error = String(e);
+		}
+	}
+
 	async bulkReject(ids: string[]): Promise<number> {
 		try {
 			const n = await invoke<number>('bulk_reject_detection_events', { ids });

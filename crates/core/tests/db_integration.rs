@@ -320,6 +320,42 @@ async fn detection_events_crud_and_status_transition() {
 }
 
 #[tokio::test]
+async fn detection_event_update_payload_refreshes_in_place() {
+    let pool = setup_pool().await;
+    let ev = DetectionEvent {
+        id: Uuid::now_v7(),
+        source: DetectionSource::Gmail,
+        source_ref: Some("merchant:CURSOR".into()),
+        raw_summary: Some("old subject".into()),
+        sender: Some("[email protected]".into()),
+        parsed_payload: serde_json::json!({ "service_name": "Cursor", "amount_minor": 3200 }),
+        confidence: 0.5,
+        status: DetectionStatus::Pending,
+        matched_subscription_id: None,
+        reviewed_at: None,
+        created_at: Utc::now(),
+    };
+    db::detection_events::insert(&pool, &ev).await.unwrap();
+
+    // Re-scan finds a higher peak amount → refresh the pending detection.
+    let fresh = serde_json::json!({ "service_name": "Cursor", "amount_minor": 3550 });
+    db::detection_events::update_payload(&pool, ev.id, &fresh, 0.9, Some("new subject"), None)
+        .await
+        .unwrap();
+
+    let got = db::detection_events::get(&pool, ev.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.parsed_payload.get("amount_minor").unwrap(), 3550);
+    assert_eq!(got.raw_summary.as_deref(), Some("new subject"));
+    assert!((got.confidence - 0.9).abs() < 1e-6);
+    // Status + identity unchanged.
+    assert_eq!(got.status, DetectionStatus::Pending);
+    assert_eq!(got.source_ref.as_deref(), Some("merchant:CURSOR"));
+}
+
+#[tokio::test]
 async fn subscription_payment_method_fk_set_null_on_delete() {
     let pool = setup_pool().await;
     let pm = NewPaymentMethod {

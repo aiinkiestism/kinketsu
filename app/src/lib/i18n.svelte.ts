@@ -313,6 +313,8 @@ const EN: Record<string, string> = {
 	'dashboard.last_scan_heading': 'Last scan',
 	'dashboard.last_scan_never': 'No scan yet — run one from the Inbox.',
 	'dashboard.last_scan_summary': '{matched} matched · {llm} to LLM · {created} new',
+	'dashboard.last_scan_updated_one': '1 existing detection refreshed with newer data',
+	'dashboard.last_scan_updated_other': '{count} existing detections refreshed with newer data',
 	'dashboard.last_scan_mode_fast': 'Quick',
 	'dashboard.last_scan_mode_deep': 'Deep',
 	'dashboard.review_heading': 'Needs review',

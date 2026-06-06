@@ -99,6 +99,34 @@ pub async fn insert(pool: &SqlitePool, ev: &DetectionEvent) -> Result<()> {
     Ok(())
 }
 
+/// Refresh the parsed fields of an existing detection in place — used when a
+/// re-scan produces better data (higher peak amount, inferred cycle) for a
+/// merchant that's still pending review. Leaves status / reviewed_at / the
+/// original `created_at` untouched.
+pub async fn update_payload(
+    pool: &SqlitePool,
+    id: Uuid,
+    parsed_payload: &serde_json::Value,
+    confidence: f32,
+    raw_summary: Option<&str>,
+    sender: Option<&str>,
+) -> Result<()> {
+    let payload = serde_json::to_string(parsed_payload)?;
+    sqlx::query(
+        "UPDATE detection_events
+         SET parsed_payload = ?, confidence = ?, raw_summary = ?, sender = ?
+         WHERE id = ?",
+    )
+    .bind(payload)
+    .bind(confidence)
+    .bind(raw_summary)
+    .bind(sender)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn update_status(
     pool: &SqlitePool,
     id: Uuid,

@@ -134,10 +134,15 @@
 			const created = deep
 				? await gmail.runDeepScan(scanRange, currentOpts())
 				: await gmail.runScan(scanRange, currentOpts());
-			if (created === 0) {
+			const updated = gmail.summary?.updated ?? 0;
+			if (created === 0 && updated === 0) {
 				scanFeedback = t('inbox.scan_complete_zero');
+			} else if (created === 0) {
+				scanFeedback = tn('dashboard.last_scan_updated', updated);
 			} else {
-				scanFeedback = tn('inbox.scan_complete', created);
+				scanFeedback =
+					tn('inbox.scan_complete', created) +
+					(updated > 0 ? ` · ${tn('dashboard.last_scan_updated', updated)}` : '');
 			}
 		} catch (e) {
 			const raw = gmail.error ?? String(e);

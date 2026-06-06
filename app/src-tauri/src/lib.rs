@@ -489,6 +489,7 @@ async fn do_scan(
         listed: screen.listed as u32,
         llm_calls: screen.llm_targets() as u32,
         created: counts.created as u32,
+        updated: counts.updated as u32,
         skipped_seen: screen.skipped_seen as u32,
         skipped_blocked: screen.skipped_blocked as u32,
         skipped_no_amount: screen.skipped_no_amount as u32,
@@ -500,12 +501,13 @@ async fn do_scan(
         .map_err(|e| e.to_string())?;
 
     log::info!(
-        "gmail scan done ({}): matched~{} listed={} llm={} created={} classified={} no_amount={} seen={} blocked={} recurrence={}",
+        "gmail scan done ({}): matched~{} listed={} llm={} created={} updated={} classified={} no_amount={} seen={} blocked={} recurrence={}",
         summary.mode,
         summary.matched_estimate,
         summary.listed,
         summary.llm_calls,
         summary.created,
+        summary.updated,
         summary.skipped_classified,
         summary.skipped_no_amount,
         summary.skipped_seen,

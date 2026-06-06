@@ -157,6 +157,7 @@ pub struct ScanSummary {
     pub listed: u32,
     pub llm_calls: u32,
     pub created: u32,
+    pub updated: u32,
     pub skipped_seen: u32,
     pub skipped_blocked: u32,
     pub skipped_no_amount: u32,
@@ -168,6 +169,8 @@ pub struct ScanSummary {
 #[derive(Debug, Clone, Copy)]
 pub struct ExtractCounts {
     pub created: usize,
+    /// Pending detections refreshed with newer data on a re-scan.
+    pub updated: usize,
     pub skipped_classified: usize,
     pub skipped_extract: usize,
 }
@@ -669,43 +672,61 @@ pub async fn extract<P: FnMut(&Progress)>(
         });
     }
 
-    // Aggregate by merchant and insert one detection per subscription-like merchant.
+    // Aggregate by merchant; insert one detection per subscription-like merchant,
+    // or refresh an existing *pending* one with the newer data. Confirmed /
+    // rejected detections are the user's decision and are left untouched.
     let mut created = 0;
+    let mut updated = 0;
     for cand in aggregate(records, range_months) {
         if !cand.looks_like_subscription() {
             continue;
         }
         let source_ref = format!("merchant:{}", cand.brand_key);
-        if db::detection_events::find_by_source_ref(pool, DetectionSource::Gmail, &source_ref)
-            .await?
-            .is_some()
-        {
-            continue; // already surfaced in a prior scan
-        }
         let payload = serde_json::to_value(cand.to_hint()).map_err(Error::from)?;
-        let ev = DetectionEvent {
-            id: uuid::Uuid::now_v7(),
-            source: DetectionSource::Gmail,
-            source_ref: Some(source_ref),
-            raw_summary: cand.sample_subject.clone(),
-            sender: cand.sample_sender.clone(),
-            parsed_payload: payload,
-            confidence: if cand.recurring && cand.amount_stable {
-                0.9
-            } else {
-                0.5
-            },
-            status: DetectionStatus::Pending,
-            matched_subscription_id: None,
-            reviewed_at: None,
-            created_at: Utc::now(),
+        let confidence = if cand.recurring && cand.amount_stable {
+            0.9
+        } else {
+            0.5
         };
-        db::detection_events::insert(pool, &ev).await?;
-        created += 1;
+        match db::detection_events::find_by_source_ref(pool, DetectionSource::Gmail, &source_ref)
+            .await?
+        {
+            Some(ev) if ev.status == DetectionStatus::Pending => {
+                db::detection_events::update_payload(
+                    pool,
+                    ev.id,
+                    &payload,
+                    confidence,
+                    cand.sample_subject.as_deref(),
+                    cand.sample_sender.as_deref(),
+                )
+                .await?;
+                updated += 1;
+            }
+            Some(_) => {} // confirmed / rejected — leave the user's decision
+            None => {
+                let ev = DetectionEvent {
+                    id: uuid::Uuid::now_v7(),
+                    source: DetectionSource::Gmail,
+                    source_ref: Some(source_ref),
+                    raw_summary: cand.sample_subject.clone(),
+                    sender: cand.sample_sender.clone(),
+                    parsed_payload: payload,
+                    confidence,
+                    status: DetectionStatus::Pending,
+                    matched_subscription_id: None,
+                    reviewed_at: None,
+                    created_at: Utc::now(),
+                };
+                db::detection_events::insert(pool, &ev).await?;
+                created += 1;
+            }
+        }
     }
 
     Ok(ExtractCounts {
         created,
+        updated,
         skipped_classified,
         skipped_extract,
     })

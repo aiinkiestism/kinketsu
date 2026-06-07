@@ -25,27 +25,13 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 /// non-English subscription mail the classifier misses.
 const PURCHASES_FILTER: &str = " category:purchases";
 
-/// Stage 1 (default) — recall-favoring payment vocabulary. Captures the
-/// card/bank usage notifications and merchant receipts that actually carry
-/// recurring charges (the merchant-keyed aggregator squeezes out the noise
-/// downstream, so precision here matters less than coverage).
-pub const TIGHT_KEYWORDS: &str = "(receipt OR invoice OR subscription OR renewal OR \"recurring payment\" OR \"自動支払い\" OR \"ご利用のお知らせ\" OR \"ご利用明細\" OR \"ご利用代金\" OR 領収 OR 請求 OR お支払い OR 月額 OR 年額 OR サブスク)";
-
-/// Stage 2 (deeper, opt-in) — broader catch-all that also pulls order
-/// confirmations and statements. Noisier, but the aggregator still keys on
-/// recurring merchants.
-pub const BROAD_KEYWORDS: &str = "(receipt OR invoice OR subscription OR renewal OR payment OR statement OR \"自動支払い\" OR \"ご利用のお知らせ\" OR \"ご利用明細\" OR \"ご利用代金\" OR 領収 OR 請求 OR 明細 OR お支払い OR ご注文 OR 決済 OR 月額 OR 年額 OR 更新 OR 定期 OR サブスク)";
+/// Recall-favoring payment vocabulary for the (single) scan. Captures card/bank
+/// usage notifications, merchant receipts, order confirmations and statements —
+/// the merchant-keyed aggregator squeezes out the noise downstream, so coverage
+/// matters more than precision here.
+pub const SCAN_KEYWORDS: &str = "(receipt OR invoice OR subscription OR renewal OR payment OR statement OR \"自動支払い\" OR \"ご利用のお知らせ\" OR \"ご利用明細\" OR \"ご利用代金\" OR 領収 OR 請求 OR 明細 OR お支払い OR ご注文 OR 決済 OR 月額 OR 年額 OR 更新 OR 定期 OR サブスク)";
 
 const BODY_CHAR_LIMIT: usize = 8000;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScanMode {
-    /// Stage 1 — tight, precision-favored keywords.
-    Fast,
-    /// Stage 2 — broad keywords; the caller is expected to apply a
-    /// recurrence filter on the results.
-    Deep,
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
 pub struct YearMonth {
@@ -75,16 +61,13 @@ fn last_day_of_month(year: i32, month: u32) -> u32 {
         .unwrap_or(28)
 }
 
-/// Build a Gmail search query for the configured keywords across the supplied
+/// Build a Gmail search query for the scan keywords across the supplied
 /// year/month ranges. Each month becomes an `after:Y/M/01 before:Y/M/last_day`
 /// clause, ORed together. Empty range omits the date filter. When
 /// `use_purchases` is set, restricts to Gmail's `category:purchases` ML label.
 #[must_use]
-pub fn build_query_for_range(months: &[YearMonth], mode: ScanMode, use_purchases: bool) -> String {
-    let keywords = match mode {
-        ScanMode::Fast => TIGHT_KEYWORDS,
-        ScanMode::Deep => BROAD_KEYWORDS,
-    };
+pub fn build_query_for_range(months: &[YearMonth], use_purchases: bool) -> String {
+    let keywords = SCAN_KEYWORDS;
     let purchases = if use_purchases { PURCHASES_FILTER } else { "" };
     let mut date_clauses = Vec::new();
     for ym in months {

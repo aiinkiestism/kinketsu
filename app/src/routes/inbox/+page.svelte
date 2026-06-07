@@ -62,9 +62,6 @@
 	let maxFetch = $state(500);
 	let maxLlm = $state(100);
 	let usePurchases = $state(false);
-	// Which mode the most recent preview estimated, so the panel can label it.
-	let previewMode = $state<'fast' | 'deep'>('fast');
-
 	function currentOpts(): ScanOptsDto {
 		return { max_fetch: maxFetch, max_llm: maxLlm, use_purchases: usePurchases };
 	}
@@ -90,11 +87,10 @@
 		return true;
 	}
 
-	async function handlePreview(deep: boolean) {
+	async function handlePreview() {
 		if (!scanPreconditions()) return;
-		previewMode = deep ? 'deep' : 'fast';
 		try {
-			await gmail.preview(scanRange, deep, currentOpts());
+			await gmail.preview(scanRange, currentOpts());
 		} catch (e) {
 			const raw = gmail.error ?? String(e);
 			if (raw.includes('scan cancelled')) {
@@ -128,12 +124,10 @@
 		}
 	}
 
-	async function runScanCommon(deep: boolean) {
+	async function handleRunScan() {
 		if (!scanPreconditions()) return;
 		try {
-			const created = deep
-				? await gmail.runDeepScan(scanRange, currentOpts())
-				: await gmail.runScan(scanRange, currentOpts());
+			const created = await gmail.runScan(scanRange, currentOpts());
 			const updated = gmail.summary?.updated ?? 0;
 			if (created === 0 && updated === 0) {
 				scanFeedback = t('inbox.scan_complete_zero');
@@ -159,14 +153,6 @@
 				openErrorDialog(parseScanError(raw));
 			}
 		}
-	}
-
-	async function handleRunScan() {
-		await runScanCommon(false);
-	}
-
-	async function handleRunDeepScan() {
-		await runScanCommon(true);
 	}
 
 	async function handleCancelScan() {
@@ -317,7 +303,7 @@
 					<button
 						type="button"
 						class="scan-preview"
-						onclick={() => handlePreview(false)}
+						onclick={handlePreview}
 						disabled={scanRange.length === 0}
 					>
 						{t('inbox.preview')}
@@ -331,25 +317,6 @@
 						{t('inbox.scan_run')}
 					</button>
 					<Tooltip text={t('inbox.scan_run_hint')} />
-				</div>
-				<div class="scan-group">
-					<button
-						type="button"
-						class="scan-preview"
-						onclick={() => handlePreview(true)}
-						disabled={scanRange.length === 0}
-					>
-						{t('inbox.preview')}
-					</button>
-					<button
-						type="button"
-						class="scan-btn-deep"
-						onclick={handleRunDeepScan}
-						disabled={scanRange.length === 0}
-					>
-						{t('inbox.scan_run_deep')}
-					</button>
-					<Tooltip text={t('inbox.scan_run_deep_hint')} />
 				</div>
 			{/if}
 			{#if scanFeedback}
@@ -371,9 +338,6 @@
 			<div class="estimate glass-subtle">
 				<div class="est-head">
 					<strong>{t('inbox.preview_matched', { count: est.matched_estimate })}</strong>
-					<span class="est-mode"
-						>{previewMode === 'deep' ? t('inbox.scan_run_deep') : t('inbox.scan_run')}</span
-					>
 				</div>
 				<p class="est-targets">{tn('inbox.preview_llm', est.llm_targets)}</p>
 				{#if est.notification_hits > 0}
@@ -526,23 +490,6 @@
 	.scan-btn.running {
 		opacity: 0.8;
 	}
-	.scan-btn-deep {
-		padding: 0.6rem 1.25rem;
-		border-radius: var(--kk-radius-sm);
-		border: 1px solid var(--kk-stroke);
-		background: transparent;
-		color: var(--kk-text-primary);
-		font-weight: 600;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.scan-btn-deep:disabled {
-		opacity: 0.4;
-		cursor: not-allowed;
-	}
-	.scan-btn-deep:hover:not(:disabled) {
-		background: var(--kk-surface-2);
-	}
 	.scan-cancel {
 		padding: 0.6rem 1rem;
 		border-radius: var(--kk-radius-sm);
@@ -608,10 +555,6 @@
 		gap: 0.4rem;
 		padding-right: 0.6rem;
 	}
-	.scan-group + .scan-group {
-		border-left: 1px solid var(--kk-stroke);
-		padding-left: 0.85rem;
-	}
 	.scan-preview {
 		padding: 0.6rem 1rem;
 		border-radius: var(--kk-radius-sm);
@@ -647,14 +590,6 @@
 	}
 	.est-head strong {
 		font-size: 1.05rem;
-	}
-	.est-mode {
-		font-size: 0.7rem;
-		padding: 0.15rem 0.5rem;
-		border-radius: 999px;
-		background: var(--kk-surface-2);
-		border: 1px solid var(--kk-stroke);
-		color: var(--kk-text-muted);
 	}
 	.est-targets {
 		margin: 0;

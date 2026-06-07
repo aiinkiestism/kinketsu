@@ -114,7 +114,7 @@ class GmailStore {
 	}
 
 	/** Dry run: estimate counts + cost without spending any LLM calls. */
-	async preview(range: YearMonthDto[], deep: boolean, opts: ScanOptsDto): Promise<ScanEstimate> {
+	async preview(range: YearMonthDto[], opts: ScanOptsDto): Promise<ScanEstimate> {
 		this.previewing = true;
 		this.error = null;
 		this.progress = null;
@@ -124,7 +124,7 @@ class GmailStore {
 			unlisten = await listen<ScanProgress>('scan-progress', (event) => {
 				this.progress = event.payload;
 			});
-			const est = await invoke<ScanEstimate>('preview_gmail_scan', { range, deep, opts });
+			const est = await invoke<ScanEstimate>('preview_gmail_scan', { range, opts });
 			this.estimate = est;
 			return est;
 		} catch (e) {
@@ -138,18 +138,6 @@ class GmailStore {
 	}
 
 	async runScan(range: YearMonthDto[], opts: ScanOptsDto): Promise<number> {
-		return this.runScanInner('run_gmail_scan', range, opts);
-	}
-
-	async runDeepScan(range: YearMonthDto[], opts: ScanOptsDto): Promise<number> {
-		return this.runScanInner('run_gmail_deep_scan', range, opts);
-	}
-
-	private async runScanInner(
-		command: string,
-		range: YearMonthDto[],
-		opts: ScanOptsDto
-	): Promise<number> {
 		this.scanning = true;
 		this.error = null;
 		this.lastScanResult = null;
@@ -160,7 +148,7 @@ class GmailStore {
 			unlisten = await listen<ScanProgress>('scan-progress', (event) => {
 				this.progress = event.payload;
 			});
-			const created = await invoke<number>(command, { range, opts });
+			const created = await invoke<number>('run_gmail_scan', { range, opts });
 			this.lastScanResult = created;
 			// Refresh the dashboard summary the backend just persisted.
 			await this.loadSummary();

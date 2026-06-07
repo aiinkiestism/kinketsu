@@ -11,7 +11,7 @@ use chrono::Datelike;
 use futures::StreamExt;
 use kinketsu_core::db;
 use kinketsu_core::oauth::{self, OAuthCredentials, Tokens};
-use kinketsu_core::parsers::gmail::{self, ScanMode, YearMonth};
+use kinketsu_core::parsers::gmail::{self, YearMonth};
 use kinketsu_core::parsers::notifications::{self, SourceKind};
 use kinketsu_core::parsers::scan::{ChargeRecord, aggregate};
 
@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
             }
         })
         .collect();
-    let query = gmail::build_query_for_range(&months, ScanMode::Deep, false);
+    let query = gmail::build_query_for_range(&months, false);
     let listing = gmail::list_message_ids(&token, &query, 2000).await?;
     eprintln!(
         "listed {} messages (estimate {})",

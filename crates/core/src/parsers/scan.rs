@@ -33,7 +33,6 @@ use crate::models::{
     BillingCycle, DetectionEvent, DetectionSource, DetectionStatus, LearnedDecision,
 };
 use crate::parsers::ParsedSubscriptionHint;
-use crate::parsers::gmail::ScanMode;
 use crate::parsers::notifications::{NotificationHint, SourceKind};
 use crate::{Error, Result};
 
@@ -48,7 +47,6 @@ pub const DEFAULT_CONCURRENCY: usize = 6;
 /// Knobs for one scan/preview run.
 #[derive(Debug, Clone, Copy)]
 pub struct ScanOptions {
-    pub mode: ScanMode,
     pub max_fetch: usize,
     pub max_llm: usize,
     pub use_purchases: bool,
@@ -57,9 +55,8 @@ pub struct ScanOptions {
 
 impl ScanOptions {
     #[must_use]
-    pub fn new(mode: ScanMode, max_fetch: usize, max_llm: usize, use_purchases: bool) -> Self {
+    pub fn new(max_fetch: usize, max_llm: usize, use_purchases: bool) -> Self {
         Self {
-            mode,
             max_fetch: max_fetch.max(1),
             max_llm: max_llm.max(1),
             use_purchases,
@@ -153,7 +150,6 @@ pub struct ScanEstimate {
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ScanSummary {
     pub ran_at: DateTime<Utc>,
-    pub mode: String,
     pub matched_estimate: u32,
     pub listed: u32,
     pub llm_calls: u32,

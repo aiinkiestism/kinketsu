@@ -324,19 +324,14 @@ pub struct PreviewCache {
     screen: parsers::scan::ScreenResult,
 }
 
-fn build_scan_opts(deep: bool, dto: &ScanOptsDto) -> parsers::scan::ScanOptions {
-    let mode = if deep {
-        parsers::gmail::ScanMode::Deep
-    } else {
-        parsers::gmail::ScanMode::Fast
-    };
+fn build_scan_opts(dto: &ScanOptsDto) -> parsers::scan::ScanOptions {
     let max_fetch = dto
         .max_fetch
         .map_or(parsers::scan::DEFAULT_MAX_FETCH, |v| v as usize);
     let max_llm = dto
         .max_llm
         .map_or(parsers::scan::DEFAULT_MAX_LLM, |v| v as usize);
-    parsers::scan::ScanOptions::new(mode, max_fetch, max_llm, dto.use_purchases)
+    parsers::scan::ScanOptions::new(max_fetch, max_llm, dto.use_purchases)
 }
 
 /// Stable key identifying a scan's inputs, so a cached preview is only reused
@@ -347,8 +342,8 @@ fn scan_signature(range: &[YearMonthDto], opts: &parsers::scan::ScanOptions) -> 
         s.push_str(&format!("{}-{};", ym.year, ym.month));
     }
     s.push_str(&format!(
-        "mode={:?};fetch={};llm={};pur={}",
-        opts.mode, opts.max_fetch, opts.max_llm, opts.use_purchases
+        "fetch={};llm={};pur={}",
+        opts.max_fetch, opts.max_llm, opts.use_purchases
     ));
     s
 }
@@ -436,10 +431,9 @@ async fn do_scan(
     app: AppHandle,
     state: State<'_, AppState>,
     range: Vec<YearMonthDto>,
-    deep: bool,
     opts: ScanOptsDto,
 ) -> Result<usize, String> {
-    let scan_opts = build_scan_opts(deep, &opts);
+    let scan_opts = build_scan_opts(&opts);
     let llm_cfg = load_llm_config(&state).await?;
     let access_token = ensure_gmail_token(&state).await?;
     let llm = LlmClient::from_config(llm_cfg);
@@ -452,11 +446,7 @@ async fn do_scan(
         Some(cached) => cached,
         None => {
             let months = to_months(range);
-            let query = parsers::gmail::build_query_for_range(
-                &months,
-                scan_opts.mode,
-                scan_opts.use_purchases,
-            );
+            let query = parsers::gmail::build_query_for_range(&months, scan_opts.use_purchases);
             parsers::scan::screen(
                 &state.pool,
                 &access_token,
@@ -484,7 +474,6 @@ async fn do_scan(
 
     let summary = parsers::scan::ScanSummary {
         ran_at: chrono::Utc::now(),
-        mode: if deep { "deep" } else { "fast" }.to_string(),
         matched_estimate: screen.matched_estimate,
         listed: screen.listed as u32,
         llm_calls: screen.llm_targets() as u32,
@@ -501,8 +490,7 @@ async fn do_scan(
         .map_err(|e| e.to_string())?;
 
     log::info!(
-        "gmail scan done ({}): matched~{} listed={} llm={} created={} updated={} classified={} no_amount={} seen={} blocked={} recurrence={}",
-        summary.mode,
+        "gmail scan done: matched~{} listed={} llm={} created={} updated={} classified={} no_amount={} seen={} blocked={} recurrence={}",
         summary.matched_estimate,
         summary.listed,
         summary.llm_calls,
@@ -518,7 +506,8 @@ async fn do_scan(
     Ok(counts.created)
 }
 
-/// Stage 1 — tight, precision-favored Gmail scan.
+/// Scan the selected months: list + screen + (deterministic-parse / LLM) +
+/// merchant-keyed aggregation, inserting/refreshing detections.
 #[tauri::command]
 #[specta::specta]
 async fn run_gmail_scan(
@@ -527,21 +516,7 @@ async fn run_gmail_scan(
     range: Vec<YearMonthDto>,
     opts: ScanOptsDto,
 ) -> Result<usize, String> {
-    do_scan(app, state, range, false, opts).await
-}
-
-/// Stage 2 — broader Gmail keywords plus a multi-month recurrence filter.
-/// Only senders appearing in 2+ distinct months proceed to the LLM, so it
-/// rewards selecting several months.
-#[tauri::command]
-#[specta::specta]
-async fn run_gmail_deep_scan(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    range: Vec<YearMonthDto>,
-    opts: ScanOptsDto,
-) -> Result<usize, String> {
-    do_scan(app, state, range, true, opts).await
+    do_scan(app, state, range, opts).await
 }
 
 /// Dry run: list + screen only (no LLM), returning how many emails matched,
@@ -554,10 +529,9 @@ async fn preview_gmail_scan(
     app: AppHandle,
     state: State<'_, AppState>,
     range: Vec<YearMonthDto>,
-    deep: bool,
     opts: ScanOptsDto,
 ) -> Result<parsers::scan::ScanEstimate, String> {
-    let scan_opts = build_scan_opts(deep, &opts);
+    let scan_opts = build_scan_opts(&opts);
     let llm_cfg = load_llm_config(&state).await?;
     let (provider, model) = llm_provider_model(&llm_cfg);
     let access_token = ensure_gmail_token(&state).await?;
@@ -566,8 +540,7 @@ async fn preview_gmail_scan(
 
     let signature = scan_signature(&range, &scan_opts);
     let months = to_months(range);
-    let query =
-        parsers::gmail::build_query_for_range(&months, scan_opts.mode, scan_opts.use_purchases);
+    let query = parsers::gmail::build_query_for_range(&months, scan_opts.use_purchases);
     let screen = parsers::scan::screen(
         &state.pool,
         &access_token,
@@ -1213,7 +1186,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         open_url,
         start_gmail_oauth,
         run_gmail_scan,
-        run_gmail_deep_scan,
         preview_gmail_scan,
         get_last_scan_summary,
         save_paypal_oauth_credentials,

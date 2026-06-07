@@ -228,9 +228,6 @@ const EN: Record<string, string> = {
 	'inbox.bulk_rejected_one': 'Rejected 1 detection.',
 	'inbox.bulk_rejected_other': 'Rejected {count} detections.',
 	'inbox.scan_run': 'Run Gmail scan',
-	'inbox.scan_run_deep': 'Deeper scan',
-	'inbox.scan_run_deep_hint':
-		'Broader Gmail query plus a multi-month recurrence filter. Slower but catches subscriptions that the default scan missed.',
 	'inbox.scan_running': 'Scanning…',
 	'inbox.scan_complete_zero': 'Scan complete — no new subscriptions detected.',
 	'inbox.scan_complete_one': 'Scan complete — 1 new detection.',
@@ -278,7 +275,7 @@ const EN: Record<string, string> = {
 
 	// Scan tooltips, options and preview
 	'inbox.scan_run_hint':
-		'Tight keywords, precision-first. Picks up the month’s renewal and charge emails, so it works even for a single month. Start here.',
+		'Reads your card/bank/PayPal notifications and merchant receipts, then groups them by service. Pick a wide range (e.g. 12 months) so quarterly and yearly subscriptions show up too.',
 	'inbox.opts_heading': 'Limits & filters',
 	'inbox.opts_max_fetch': 'Max emails to fetch',
 	'inbox.opts_max_fetch_hint':
@@ -316,8 +313,6 @@ const EN: Record<string, string> = {
 	'dashboard.last_scan_summary': '{matched} matched · {llm} to LLM · {created} new',
 	'dashboard.last_scan_updated_one': '1 existing detection refreshed with newer data',
 	'dashboard.last_scan_updated_other': '{count} existing detections refreshed with newer data',
-	'dashboard.last_scan_mode_fast': 'Quick',
-	'dashboard.last_scan_mode_deep': 'Deep',
 	'dashboard.review_heading': 'Needs review',
 	'dashboard.review_empty': 'Nothing waiting for review.',
 	'dashboard.review_view_all': 'Review all',

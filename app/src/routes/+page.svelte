@@ -366,11 +366,7 @@
 				{#if gmail.summary.updated > 0}
 					<p class="muted small">{tn('dashboard.last_scan_updated', gmail.summary.updated)}</p>
 				{/if}
-				<p class="muted small">
-					{gmail.summary.mode === 'deep'
-						? t('dashboard.last_scan_mode_deep')
-						: t('dashboard.last_scan_mode_fast')} · {formatTimestamp(gmail.summary.ran_at)}
-				</p>
+				<p class="muted small">{formatTimestamp(gmail.summary.ran_at)}</p>
 			{:else}
 				<p class="muted">{t('dashboard.last_scan_never')}</p>
 			{/if}

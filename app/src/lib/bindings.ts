@@ -77,25 +77,21 @@ export const commands = {
 	 */
 	openUrl: (url: string) => typedError<null, string>(__TAURI_INVOKE("open_url", { url })),
 	startGmailOauth: () => typedError<null, string>(__TAURI_INVOKE("start_gmail_oauth")),
-	// Stage 1 — tight, precision-favored Gmail scan.
-	runGmailScan: (range: YearMonthDto[], opts: ScanOptsDto) => typedError<number, string>(__TAURI_INVOKE("run_gmail_scan", { range, opts })),
 	/**
-	 *  Stage 2 — broader Gmail keywords plus a multi-month recurrence filter.
-	 *  Only senders appearing in 2+ distinct months proceed to the LLM, so it
-	 *  rewards selecting several months.
+	 *  Scan the selected months: list + screen + (deterministic-parse / LLM) +
+	 *  merchant-keyed aggregation, inserting/refreshing detections.
 	 */
-	runGmailDeepScan: (range: YearMonthDto[], opts: ScanOptsDto) => typedError<number, string>(__TAURI_INVOKE("run_gmail_deep_scan", { range, opts })),
+	runGmailScan: (range: YearMonthDto[], opts: ScanOptsDto) => typedError<number, string>(__TAURI_INVOKE("run_gmail_scan", { range, opts })),
 	/**
 	 *  Dry run: list + screen only (no LLM), returning how many emails matched,
 	 *  how many would reach the LLM, and an estimated token/cost figure. Caches
 	 *  the screened survivors so a follow-up scan with the same parameters skips
 	 *  re-fetching.
 	 */
-	previewGmailScan: (range: YearMonthDto[], deep: boolean, opts: ScanOptsDto) => typedError<ScanEstimate, string>(__TAURI_INVOKE("preview_gmail_scan", { range, deep, opts })),
+	previewGmailScan: (range: YearMonthDto[], opts: ScanOptsDto) => typedError<ScanEstimate, string>(__TAURI_INVOKE("preview_gmail_scan", { range, opts })),
 	// Most recent scan summary for the dashboard card.
 	getLastScanSummary: () => typedError<{
 	ran_at: string,
-	mode: string,
 	matched_estimate: number,
 	listed: number,
 	llm_calls: number,
@@ -309,7 +305,6 @@ export type ScanOptsDto = {
 // Persisted record of the most recent scan, surfaced on the dashboard.
 export type ScanSummary = {
 	ran_at: string,
-	mode: string,
 	matched_estimate: number,
 	listed: number,
 	llm_calls: number,

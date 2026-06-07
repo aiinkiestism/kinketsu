@@ -446,11 +446,11 @@ async fn do_scan(
         Some(cached) => cached,
         None => {
             let months = to_months(range);
-            let query = parsers::gmail::build_query_for_range(&months, scan_opts.use_purchases);
             parsers::scan::screen(
                 &state.pool,
                 &access_token,
-                &query,
+                &months,
+                scan_opts.use_purchases,
                 &scan_opts,
                 &state.scan_cancel,
                 make_scan_emit(&app),
@@ -540,11 +540,11 @@ async fn preview_gmail_scan(
 
     let signature = scan_signature(&range, &scan_opts);
     let months = to_months(range);
-    let query = parsers::gmail::build_query_for_range(&months, scan_opts.use_purchases);
     let screen = parsers::scan::screen(
         &state.pool,
         &access_token,
-        &query,
+        &months,
+        scan_opts.use_purchases,
         &scan_opts,
         &state.scan_cancel,
         make_scan_emit(&app),

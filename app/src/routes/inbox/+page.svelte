@@ -59,8 +59,8 @@
 	let scanFeedback = $state<string | null>(null);
 
 	// Scan limits & filters, set before scanning.
-	let maxFetch = $state(500);
-	let maxLlm = $state(100);
+	let maxFetch = $state(1000);
+	let maxLlm = $state(250);
 	let usePurchases = $state(false);
 	function currentOpts(): ScanOptsDto {
 		return { max_fetch: maxFetch, max_llm: maxLlm, use_purchases: usePurchases };

@@ -39,10 +39,14 @@ use crate::{Error, Result};
 /// Sentinel returned when the cooperative cancel flag is set mid-pass.
 pub const CANCELLED: &str = "scan cancelled";
 
-pub const DEFAULT_MAX_FETCH: usize = 800;
-pub const DEFAULT_MAX_LLM: usize = 120;
+/// Per-month cap on messages fetched + screened. A safety net that's rarely
+/// hit (most months have far fewer matching mails); the per-month listing is
+/// what guarantees full coverage of every selected month.
+pub const DEFAULT_MAX_FETCH: usize = 1000;
+/// Total cap on freeform receipts sent to the LLM across the whole scan.
+pub const DEFAULT_MAX_LLM: usize = 250;
 /// In-flight Gmail/LLM requests per pass.
-pub const DEFAULT_CONCURRENCY: usize = 6;
+pub const DEFAULT_CONCURRENCY: usize = 8;
 
 /// Knobs for one scan/preview run.
 #[derive(Debug, Clone, Copy)]
@@ -450,16 +454,39 @@ enum Outcome {
 pub async fn screen<P: FnMut(&Progress)>(
     pool: &SqlitePool,
     access_token: &str,
-    query: &str,
+    months: &[gmail::YearMonth],
+    use_purchases: bool,
     opts: &ScanOptions,
     cancel: &AtomicBool,
     mut progress: P,
 ) -> Result<ScreenResult> {
-    let listing = gmail::list_message_ids(access_token, query, opts.max_fetch).await?;
-    let total = listing.ids.len();
-    let matched_estimate = listing.estimate;
+    // List **per month** so every selected month is fully covered. A single
+    // ORed query is capped globally and, since Gmail returns newest-first, that
+    // silently drops the older months in a high-volume inbox — a "12-month"
+    // scan would only really see the last couple of months.
+    let mut ids: Vec<String> = Vec::new();
+    let mut matched_estimate = 0u32;
+    if months.is_empty() {
+        let q = gmail::build_query_for_range(&[], use_purchases);
+        let listing = gmail::list_message_ids(access_token, &q, opts.max_fetch).await?;
+        matched_estimate = listing.estimate;
+        ids = listing.ids;
+    } else {
+        for m in months {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Parser(CANCELLED.to_string()));
+            }
+            let q = gmail::build_query_for_range(std::slice::from_ref(m), use_purchases);
+            let listing = gmail::list_message_ids(access_token, &q, opts.max_fetch).await?;
+            matched_estimate = matched_estimate.saturating_add(listing.estimate);
+            ids.extend(listing.ids);
+        }
+        ids.sort_unstable();
+        ids.dedup();
+    }
+    let total = ids.len();
 
-    let futs = listing.ids.into_iter().map(|id| {
+    let futs = ids.into_iter().map(|id| {
         let pool = pool.clone();
         async move {
             let msg = match gmail::fetch_message(access_token, &id).await {

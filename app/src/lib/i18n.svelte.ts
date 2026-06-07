@@ -277,9 +277,9 @@ const EN: Record<string, string> = {
 	'inbox.scan_run_hint':
 		'Reads your card/bank/PayPal notifications and merchant receipts, then groups them by service. Pick a wide range (e.g. 12 months) so quarterly and yearly subscriptions show up too.',
 	'inbox.opts_heading': 'Limits & filters',
-	'inbox.opts_max_fetch': 'Max emails to fetch',
+	'inbox.opts_max_fetch': 'Max emails / month',
 	'inbox.opts_max_fetch_hint':
-		'Upper bound on how many matching emails to download and screen before the LLM step.',
+		'Per-month cap on emails to download and screen. Listing per month guarantees every selected month is fully covered — a single global cap would silently drop the older months.',
 	'inbox.opts_max_llm': 'Max LLM calls',
 	'inbox.opts_max_llm_hint':
 		'Upper bound on how many screened emails get sent to the LLM — this is the part that costs money.',

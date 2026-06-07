@@ -40,17 +40,24 @@ async fn main() -> anyhow::Result<()> {
             }
         })
         .collect();
-    let query = gmail::build_query_for_range(&months, false);
-    let listing = gmail::list_message_ids(&token, &query, 2000).await?;
+    // List per month so every month is fully covered (a global cap would drop
+    // the older months in this high-volume inbox).
+    let mut ids: Vec<String> = Vec::new();
+    for m in &months {
+        let q = gmail::build_query_for_range(std::slice::from_ref(m), false);
+        ids.extend(gmail::list_message_ids(&token, &q, 1000).await?.ids);
+    }
+    ids.sort_unstable();
+    ids.dedup();
     eprintln!(
-        "listed {} messages (estimate {})",
-        listing.ids.len(),
-        listing.estimate
+        "listed {} messages across {} months",
+        ids.len(),
+        months.len()
     );
 
     // Fetch concurrently, parse only the deterministic notification path.
     let token = &token;
-    let futs = listing.ids.into_iter().map(|id| async move {
+    let futs = ids.into_iter().map(|id| async move {
         let msg = gmail::fetch_message(token, &id).await.ok()?;
         let r = gmail::message_ref_from(&msg, &id);
         let sender = r.from.as_deref().map(gmail::normalize_sender)?;

@@ -21,7 +21,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use chrono::{DateTime, Datelike, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -78,6 +78,7 @@ pub struct Candidate {
     pub sender: Option<String>,
     pub body: String,
     pub year_month: Option<(i32, u32)>,
+    pub received_on: Option<NaiveDate>,
     pub notif: Option<NotificationHint>,
 }
 
@@ -191,6 +192,7 @@ pub struct ChargeRecord {
     pub amount_minor: Option<i64>,
     pub currency: Option<String>,
     pub billing_cycle: Option<BillingCycle>,
+    pub charged_on: Option<NaiveDate>,
     pub kind: SourceKind,
 }
 
@@ -206,6 +208,8 @@ pub struct SubscriptionCandidate {
     pub occurrences: usize,
     pub recurring: bool,
     pub amount_stable: bool,
+    pub first_charged_at: Option<NaiveDate>,
+    pub last_charged_at: Option<NaiveDate>,
     pub kind: SourceKind,
     pub sample_message_id: String,
     pub sample_sender: Option<String>,
@@ -280,6 +284,23 @@ pub fn aggregate(records: Vec<ChargeRecord>, range_months: usize) -> Vec<Subscri
         }
     }
 
+    // Fold merchant-of-record clusters (Lemon Squeezy, Paddle…) into the actual
+    // product cluster that shares a charge amount+date — the platform name is
+    // uninformative ("Lemon Squeezy LLC" is really "3D AI Studio"). A MoR cluster
+    // with no product match is kept as-is.
+    let (mor, mut clusters): (Vec<_>, Vec<_>) = clusters
+        .into_iter()
+        .partition(|cl| merchant::is_merchant_of_record(&cl[0].merchant_raw));
+    for mc in mor {
+        match clusters
+            .iter_mut()
+            .find(|nc| clusters_share_charge(nc, &mc))
+        {
+            Some(target) => target.extend(mc),
+            None => clusters.push(mc),
+        }
+    }
+
     let mut out = Vec::with_capacity(clusters.len());
     for cl in clusters {
         let months: std::collections::HashSet<(i32, u32)> =
@@ -332,6 +353,15 @@ pub fn aggregate(records: Vec<ChargeRecord>, range_months: usize) -> Vec<Subscri
             .map(|r| r.kind)
             .max_by_key(|k| source_rank(*k))
             .unwrap();
+        let first_charged_at = cl.iter().filter_map(|r| r.charged_on).min();
+        let last_charged_at = cl.iter().filter_map(|r| r.charged_on).max();
+        // The display name comes from the non-MoR product record when present.
+        let name = cl
+            .iter()
+            .filter(|r| !merchant::is_merchant_of_record(&r.merchant_raw))
+            .max_by_key(|r| source_rank(r.kind))
+            .and_then(|r| r.display_name.clone())
+            .unwrap_or(name);
 
         out.push(SubscriptionCandidate {
             name,
@@ -343,6 +373,8 @@ pub fn aggregate(records: Vec<ChargeRecord>, range_months: usize) -> Vec<Subscri
             occurrences: cl.len(),
             recurring: months.len() >= 2,
             amount_stable,
+            first_charged_at,
+            last_charged_at,
             kind,
             sample_message_id: best.message_id.clone(),
             sample_sender: best.sender.clone(),
@@ -350,6 +382,25 @@ pub fn aggregate(records: Vec<ChargeRecord>, range_months: usize) -> Vec<Subscri
         });
     }
     out
+}
+
+/// True when two clusters share a charge with the same currency + amount within
+/// a week — the signal that a merchant-of-record line and a product receipt are
+/// the same payment.
+fn clusters_share_charge(a: &[ChargeRecord], b: &[ChargeRecord]) -> bool {
+    for ra in a {
+        for rb in b {
+            if ra.amount_minor.is_some()
+                && ra.amount_minor == rb.amount_minor
+                && ra.currency == rb.currency
+                && let (Some(da), Some(db)) = (ra.charged_on, rb.charged_on)
+                && (da - db).num_days().abs() <= 7
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 impl SubscriptionCandidate {
@@ -383,7 +434,8 @@ impl SubscriptionCandidate {
             currency: self.currency.clone(),
             billing_cycle: self.billing_cycle,
             payment_method_hint: None,
-            charged_at: None,
+            charged_at: self.first_charged_at,
+            last_charged_at: self.last_charged_at,
             months_seen: Some(u32::try_from(self.months).unwrap_or(u32::MAX)),
             occurrences: Some(u32::try_from(self.occurrences).unwrap_or(u32::MAX)),
             recurring: Some(self.recurring),
@@ -449,6 +501,7 @@ pub async fn screen<P: FnMut(&Progress)>(
                 sender,
                 body: gmail::trim_body(body),
                 year_month: r.received_at.map(|d| (d.year(), d.month())),
+                received_on: r.received_at.map(|d| d.date_naive()),
                 notif,
             }))
         }
@@ -586,6 +639,7 @@ pub async fn extract<P: FnMut(&Progress)>(
             amount_minor: n.amount_minor,
             currency: n.currency.clone(),
             billing_cycle: None,
+            charged_on: c.received_on,
             kind: n.kind,
         });
         processed += 1;
@@ -606,6 +660,7 @@ pub async fn extract<P: FnMut(&Progress)>(
         Option<String>,
         Option<String>,
         Option<(i32, u32)>,
+        Option<NaiveDate>,
         String,
     );
     let jobs: Vec<Job> = screen
@@ -618,19 +673,20 @@ pub async fn extract<P: FnMut(&Progress)>(
                 c.subject.clone(),
                 c.sender.clone(),
                 c.year_month,
+                c.received_on,
                 c.body.clone(),
             )
         })
         .collect();
-    let futs = jobs
-        .into_iter()
-        .map(|(id, subject, sender, month, body)| async move {
+    let futs = jobs.into_iter().map(
+        |(id, subject, sender, month, received_on, body)| async move {
             let hint = super::extract_from_text(llm, body).await;
-            (id, subject, sender, month, hint)
-        });
+            (id, subject, sender, month, received_on, hint)
+        },
+    );
     let mut stream = futures::stream::iter(futs).buffer_unordered(concurrency);
 
-    while let Some((id, subject, sender, month, hint)) = stream.next().await {
+    while let Some((id, subject, sender, month, received_on, hint)) = stream.next().await {
         if cancel.load(Ordering::Relaxed) {
             return Err(Error::Parser(CANCELLED.to_string()));
         }
@@ -652,6 +708,7 @@ pub async fn extract<P: FnMut(&Progress)>(
                     amount_minor: h.amount_minor,
                     currency: h.currency.clone(),
                     billing_cycle: h.billing_cycle,
+                    charged_on: h.charged_at.or(received_on),
                     kind: SourceKind::MerchantReceipt,
                 });
             }
@@ -747,6 +804,31 @@ mod tests {
             amount_minor: Some(amt),
             currency: Some("JPY".into()),
             billing_cycle: None,
+            charged_on: NaiveDate::from_ymd_opt(ym.0, ym.1, 15),
+            kind,
+        }
+    }
+
+    /// A charge record with an explicit name, currency and exact date.
+    fn rec_at(
+        merchant: &str,
+        display: Option<&str>,
+        amt: i64,
+        currency: &str,
+        date: NaiveDate,
+        kind: SourceKind,
+    ) -> ChargeRecord {
+        ChargeRecord {
+            message_id: format!("{merchant}-{date}"),
+            sender: None,
+            subject: None,
+            month: Some((date.year(), date.month())),
+            merchant_raw: merchant.to_string(),
+            display_name: display.map(str::to_string),
+            amount_minor: Some(amt),
+            currency: Some(currency.to_string()),
+            billing_cycle: None,
+            charged_on: Some(date),
             kind,
         }
     }
@@ -908,5 +990,52 @@ mod tests {
             1,
         );
         assert_eq!(short[0].billing_cycle, Some(BillingCycle::Monthly));
+    }
+
+    #[test]
+    fn merchant_of_record_folds_into_product_by_amount_and_date() {
+        // PayPal "Lemon Squeezy LLC" $31.90 on the same day as the product's own
+        // receipt → one detection named after the product, not the platform.
+        let d = NaiveDate::from_ymd_opt(2026, 5, 18).unwrap();
+        let records = vec![
+            rec_at(
+                "Lemon Squeezy LLC",
+                None,
+                3190,
+                "USD",
+                d,
+                SourceKind::ProcessorNotification,
+            ),
+            rec_at(
+                "3D AI Studio",
+                Some("3D AI Studio"),
+                3190,
+                "USD",
+                d,
+                SourceKind::MerchantReceipt,
+            ),
+        ];
+        let aggs = aggregate(records, 12);
+        assert_eq!(aggs.len(), 1, "platform charge merges into the product");
+        assert_eq!(aggs[0].name, "3D AI Studio");
+        assert_eq!(aggs[0].last_charged_at, Some(d));
+    }
+
+    #[test]
+    fn merchant_of_record_without_match_stays_standalone() {
+        let d = NaiveDate::from_ymd_opt(2026, 5, 18).unwrap();
+        let aggs = aggregate(
+            vec![rec_at(
+                "Lemon Squeezy LLC",
+                None,
+                3190,
+                "USD",
+                d,
+                SourceKind::ProcessorNotification,
+            )],
+            12,
+        );
+        assert_eq!(aggs.len(), 1);
+        assert_eq!(aggs[0].last_charged_at, Some(d));
     }
 }

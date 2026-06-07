@@ -67,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
             amount_minor: n.amount_minor,
             currency: n.currency,
             billing_cycle: None,
+            charged_on: r.received_at.map(|d| d.date_naive()),
             kind: n.kind,
         })
     });

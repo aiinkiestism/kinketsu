@@ -102,6 +102,28 @@ pub fn brand_key(raw: &str) -> String {
     tokens.concat()
 }
 
+/// Merchants-of-record / checkout platforms whose name on a card or PayPal line
+/// tells you nothing about the actual product (the real service sends its own
+/// "via X" receipt). Charges under these names are merged into the matching
+/// product by amount+date during aggregation.
+// Matched as substrings against the folded, alphanumeric-only name. `LEMONSQUEEZ`
+// (not `…Y`) also catches the truncated `PAYPAL *LEMONSQUEEZ` card line.
+const MERCHANTS_OF_RECORD: &[&str] = &["LEMONSQUEEZ", "PADDLE", "FASTSPRING", "GUMROAD"];
+
+/// True when `raw` is a merchant-of-record / payment platform rather than the
+/// actual product (e.g. `Lemon Squeezy LLC`, `PADDLE.NET`). Checks the folded
+/// name *before* processor-prefix stripping, since `PADDLE`/`PAYPAL` are
+/// themselves stripped by [`brand_key`].
+#[must_use]
+pub fn is_merchant_of_record(raw: &str) -> bool {
+    let folded: String = fold_fullwidth(raw)
+        .to_uppercase()
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect();
+    MERCHANTS_OF_RECORD.iter().any(|m| folded.contains(m))
+}
+
 fn title_case(token: &str) -> String {
     let mut chars = token.chars();
     match chars.next() {
@@ -196,6 +218,14 @@ mod tests {
     fn slate_and_splice_real_strings() {
         assert!(same_merchant("SLATE DIGITAL LLC", "PAYPAL *SLATE DIGIT"));
         assert!(same_merchant("PAYPAL *SPLICE", "Splice"));
+    }
+
+    #[test]
+    fn recognizes_merchants_of_record() {
+        assert!(is_merchant_of_record("Lemon Squeezy LLC"));
+        assert!(is_merchant_of_record("PADDLE.NET"));
+        assert!(!is_merchant_of_record("Canva Pty Limited"));
+        assert!(!is_merchant_of_record("3D AI Studio"));
     }
 
     #[test]

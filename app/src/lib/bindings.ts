@@ -237,6 +237,8 @@ export type ParsedSubscriptionHint = {
 	billing_cycle: BillingCycle | null,
 	payment_method_hint: string | null,
 	charged_at: string | null,
+	// Most recent charge date for this merchant in the scanned range.
+	last_charged_at?: string | null,
 	// Distinct months this merchant was charged in the scanned range.
 	months_seen?: number | null,
 	// Total charges aggregated for this merchant.

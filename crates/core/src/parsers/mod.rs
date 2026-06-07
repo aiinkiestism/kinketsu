@@ -35,6 +35,9 @@ pub struct ParsedSubscriptionHint {
     pub billing_cycle: Option<BillingCycle>,
     pub payment_method_hint: Option<String>,
     pub charged_at: Option<NaiveDate>,
+    /// Most recent charge date for this merchant in the scanned range.
+    #[serde(default)]
+    pub last_charged_at: Option<NaiveDate>,
     /// Distinct months this merchant was charged in the scanned range.
     #[serde(default)]
     pub months_seen: Option<u32>,

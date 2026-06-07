@@ -39,6 +39,7 @@ const EN: Record<string, string> = {
 	'review.col_recurring': 'Recurring',
 	'review.col_source': 'Source',
 	'review.col_status': 'Status',
+	'review.col_last_charged': 'Last charged',
 	'review.col_detected': 'Detected',
 	'review.col_actions': '',
 	'review.restore': 'Restore',

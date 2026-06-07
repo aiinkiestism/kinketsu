@@ -6,7 +6,15 @@
 	import { CURRENCIES } from '$lib/constants';
 	import type { BillingCycle, DetectionEvent } from '$lib/bindings';
 
-	type SortKey = 'service' | 'amount' | 'cycle' | 'recurring' | 'source' | 'status' | 'detected';
+	type SortKey =
+		| 'service'
+		| 'amount'
+		| 'cycle'
+		| 'recurring'
+		| 'source'
+		| 'status'
+		| 'last_charged'
+		| 'detected';
 	type StatusFilter = 'all' | 'pending' | 'confirmed' | 'rejected';
 	type SourceFilter = 'all' | 'merchant_receipt' | 'processor_notification' | 'card_notification';
 
@@ -74,6 +82,9 @@
 				break;
 			case 'status':
 				x = a.status.localeCompare(b.status);
+				break;
+			case 'last_charged':
+				x = (pa.last_charged_at ?? '').localeCompare(pb.last_charged_at ?? '');
 				break;
 			case 'detected':
 				x = a.created_at.localeCompare(b.created_at);
@@ -217,6 +228,7 @@
 						<th class="sortable num" onclick={() => toggleSort('recurring')}>{t('review.col_recurring')}{sortArrow('recurring')}</th>
 						<th class="sortable" onclick={() => toggleSort('source')}>{t('review.col_source')}{sortArrow('source')}</th>
 						<th class="sortable" onclick={() => toggleSort('status')}>{t('review.col_status')}{sortArrow('status')}</th>
+						<th class="sortable" onclick={() => toggleSort('last_charged')}>{t('review.col_last_charged')}{sortArrow('last_charged')}</th>
 						<th class="sortable" onclick={() => toggleSort('detected')}>{t('review.col_detected')}{sortArrow('detected')}</th>
 						<th class="actions-col"></th>
 					</tr>
@@ -251,6 +263,11 @@
 								{ev.parsed_payload.source_kind ? t(`source_kind.${ev.parsed_payload.source_kind}`) : '—'}
 							</td>
 							<td><span class="status-pill status-{ev.status}">{t(`status.${ev.status}`)}</span></td>
+							<td class="muted small">
+								{ev.parsed_payload.last_charged_at
+									? formatTimestamp(ev.parsed_payload.last_charged_at)
+									: '—'}
+							</td>
 							<td class="muted small">{formatTimestamp(ev.created_at)}</td>
 							<td class="actions">
 								{#if ev.status === 'pending'}
@@ -264,7 +281,7 @@
 						</tr>
 						{#if editingId === ev.id}
 							<tr class="edit-row">
-								<td colspan="9">
+								<td colspan="10">
 									<div class="edit-grid">
 										<label><span>{t('form.name')}</span><input bind:value={editName} required /></label>
 										<label><span>{t('form.amount')}</span>

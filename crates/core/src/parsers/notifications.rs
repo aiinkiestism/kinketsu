@@ -92,7 +92,9 @@ pub fn parse_known(sender: &str, subject: &str, body: &str) -> Option<Notificati
     // PayPal — merchant in subject, amount in body.
     if s.contains("paypal.com") || s.contains("@paypal") {
         if let Some(c) = PAYPAL_SUBJECT.captures(subject) {
-            let merchant = trim_merchant(&c[1]);
+            // "お客さまはNintendo様への支払い…" → the merchant is "Nintendo".
+            let captured = c[1].trim().strip_prefix("お客さまは").unwrap_or(&c[1]);
+            let merchant = trim_merchant(captured);
             if !merchant.is_empty() {
                 let amt = parse_amount(body);
                 return Some(NotificationHint {
@@ -199,6 +201,18 @@ mod tests {
         assert_eq!(h.merchant_raw, "Lemon Squeezy LLC");
         assert_eq!(h.amount_minor, Some(3190));
         assert_eq!(h.currency.as_deref(), Some("USD"));
+    }
+
+    #[test]
+    fn paypal_strips_okyakusama_prefix() {
+        let h = parse_known(
+            "service-jp@paypal.com",
+            "お客さまはNintendo様への支払いを承認されました",
+            "¥6,578",
+        )
+        .unwrap();
+        assert_eq!(h.merchant_raw, "Nintendo");
+        assert_eq!(h.amount_minor, Some(6578));
     }
 
     #[test]

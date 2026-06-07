@@ -108,7 +108,15 @@ pub fn brand_key(raw: &str) -> String {
 /// product by amount+date during aggregation.
 // Matched as substrings against the folded, alphanumeric-only name. `LEMONSQUEEZ`
 // (not `…Y`) also catches the truncated `PAYPAL *LEMONSQUEEZ` card line.
-const MERCHANTS_OF_RECORD: &[&str] = &["LEMONSQUEEZ", "PADDLE", "FASTSPRING", "GUMROAD"];
+// `PAYPALWALLET` is the card label for a PayPal-balance-funded purchase where the
+// real merchant wasn't passed through — uninformative, varies per charge.
+const MERCHANTS_OF_RECORD: &[&str] = &[
+    "LEMONSQUEEZ",
+    "PADDLE",
+    "FASTSPRING",
+    "GUMROAD",
+    "PAYPALWALLET",
+];
 
 /// True when `raw` is a merchant-of-record / payment platform rather than the
 /// actual product (e.g. `Lemon Squeezy LLC`, `PADDLE.NET`). Checks the folded

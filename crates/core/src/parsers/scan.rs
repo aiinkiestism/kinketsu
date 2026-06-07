@@ -271,9 +271,15 @@ fn infer_cycle(
 /// once-a-year charge apart from a just-started monthly one.
 #[must_use]
 pub fn aggregate(records: Vec<ChargeRecord>, range_months: usize) -> Vec<SubscriptionCandidate> {
-    // Greedy clustering by brand similarity.
+    // Merchant-of-record / wallet charges (Lemon Squeezy, "PayPal wallet"…) carry
+    // no usable merchant — the same label fronts many different products. Hold
+    // them aside and cluster only the named charges first.
+    let (mor_records, named): (Vec<_>, Vec<_>) = records
+        .into_iter()
+        .partition(|r| merchant::is_merchant_of_record(&r.merchant_raw));
+
     let mut clusters: Vec<Vec<ChargeRecord>> = Vec::new();
-    for r in records {
+    for r in named {
         if let Some(cl) = clusters
             .iter_mut()
             .find(|cl| merchant::same_merchant(&cl[0].merchant_raw, &r.merchant_raw))
@@ -284,20 +290,17 @@ pub fn aggregate(records: Vec<ChargeRecord>, range_months: usize) -> Vec<Subscri
         }
     }
 
-    // Fold merchant-of-record clusters (Lemon Squeezy, Paddle…) into the actual
-    // product cluster that shares a charge amount+date — the platform name is
-    // uninformative ("Lemon Squeezy LLC" is really "3D AI Studio"). A MoR cluster
-    // with no product match is kept as-is.
-    let (mor, mut clusters): (Vec<_>, Vec<_>) = clusters
-        .into_iter()
-        .partition(|cl| merchant::is_merchant_of_record(&cl[0].merchant_raw));
-    for mc in mor {
-        match clusters
+    // Attach each platform charge to the product that shares its amount+date
+    // (so "Lemon Squeezy $31.90" folds into the "3D AI Studio" receipt, and a
+    // "PayPal wallet ¥6,578" line folds into the Nintendo purchase). Platform
+    // charges with no matching product are dropped — the label alone isn't an
+    // identifiable subscription.
+    for r in mor_records {
+        if let Some(cl) = clusters
             .iter_mut()
-            .find(|nc| clusters_share_charge(nc, &mc))
+            .find(|cl| cl.iter().any(|p| same_charge(p, &r)))
         {
-            Some(target) => target.extend(mc),
-            None => clusters.push(mc),
+            cl.push(r);
         }
     }
 
@@ -384,23 +387,14 @@ pub fn aggregate(records: Vec<ChargeRecord>, range_months: usize) -> Vec<Subscri
     out
 }
 
-/// True when two clusters share a charge with the same currency + amount within
-/// a week — the signal that a merchant-of-record line and a product receipt are
-/// the same payment.
-fn clusters_share_charge(a: &[ChargeRecord], b: &[ChargeRecord]) -> bool {
-    for ra in a {
-        for rb in b {
-            if ra.amount_minor.is_some()
-                && ra.amount_minor == rb.amount_minor
-                && ra.currency == rb.currency
-                && let (Some(da), Some(db)) = (ra.charged_on, rb.charged_on)
-                && (da - db).num_days().abs() <= 7
-            {
-                return true;
-            }
-        }
-    }
-    false
+/// True when two charges are the same payment seen from two sides: same
+/// currency + amount within a week. Links a merchant-of-record line to the
+/// product receipt it actually paid for.
+fn same_charge(a: &ChargeRecord, b: &ChargeRecord) -> bool {
+    a.amount_minor.is_some()
+        && a.amount_minor == b.amount_minor
+        && a.currency == b.currency
+        && matches!((a.charged_on, b.charged_on), (Some(da), Some(db)) if (da - db).num_days().abs() <= 7)
 }
 
 impl SubscriptionCandidate {
@@ -1022,7 +1016,9 @@ mod tests {
     }
 
     #[test]
-    fn merchant_of_record_without_match_stays_standalone() {
+    fn merchant_of_record_without_match_is_dropped() {
+        // A platform charge with no product receipt to match isn't an
+        // identifiable subscription, so it doesn't surface.
         let d = NaiveDate::from_ymd_opt(2026, 5, 18).unwrap();
         let aggs = aggregate(
             vec![rec_at(
@@ -1035,7 +1031,61 @@ mod tests {
             )],
             12,
         );
-        assert_eq!(aggs.len(), 1);
-        assert_eq!(aggs[0].last_charged_at, Some(d));
+        assert!(aggs.is_empty());
+    }
+
+    #[test]
+    fn paypal_wallet_charges_attribute_to_real_merchants_not_a_fake_sub() {
+        // "PayPal wallet" fronts different purchases each month (Nintendo, STORES).
+        // Each folds into its real merchant by amount+date; none cluster into a
+        // bogus "Paypalwallet" subscription.
+        let may = NaiveDate::from_ymd_opt(2026, 5, 18).unwrap();
+        let apr = NaiveDate::from_ymd_opt(2026, 4, 4).unwrap();
+        let records = vec![
+            rec_at(
+                "Nintendo",
+                None,
+                6578,
+                "JPY",
+                may,
+                SourceKind::ProcessorNotification,
+            ),
+            rec_at(
+                "STORES",
+                None,
+                2980,
+                "JPY",
+                apr,
+                SourceKind::ProcessorNotification,
+            ),
+            rec_at(
+                "PAYPALWALLET",
+                None,
+                6578,
+                "JPY",
+                may,
+                SourceKind::CardNotification,
+            ),
+            rec_at(
+                "PAYPALWALLET",
+                None,
+                2980,
+                "JPY",
+                apr,
+                SourceKind::CardNotification,
+            ),
+        ];
+        let aggs = aggregate(records, 12);
+        let names: Vec<_> = aggs.iter().map(|c| c.name.as_str()).collect();
+        assert!(
+            !names
+                .iter()
+                .any(|n| n.to_uppercase().contains("PAYPALWALLET"))
+        );
+        assert_eq!(
+            aggs.len(),
+            2,
+            "two distinct merchants, no merged wallet sub"
+        );
     }
 }
